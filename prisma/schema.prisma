@@ -6,10 +6,154 @@
 
 generator client {
   provider = "prisma-client-js"
-  output   = "../src/generated/prisma"
+  // output   = "../src/generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  super_admin
+  owner
+  staff
+}
+
+enum UnitStatus {
+  available
+  occupied
+  maintenance
+  broken
+}
+
+enum BillingType {
+  timer
+  hourly
+  package
+  hybrid
+}
+
+enum SessionStatus {
+  active
+  completed
+  cancelled
+  power_outage_stopped
+}
+
+enum PaymentStatus {
+  pending
+  paid
+  failed
+  refunded
+}
+
+model Tenant {
+  id                    String    @id @default(cuid())
+  name                  String
+  subdomain             String    @unique
+  customDomain          String?   @unique @map("custom_domain")
+  domainVerified        Boolean   @default(false) @map("domain_verified")
+  customerPageEnabled   Boolean   @default(true) @map("customer_page_enabled")
+  ownerId               String?   @map("owner_id")
+  address               String?
+  phone                 String?
+  settings              Json      @default("{}")
+  isActive              Boolean   @default(true) @map("is_active")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  users                 User[]
+  locations             Location[]
+  
+  @@map("tenants")
+}
+
+model User {
+  id                    String    @id @default(cuid())
+  email                 String    @unique
+  passwordHash          String    @map("password_hash")
+  role                  UserRole
+  tenantId              String?   @map("tenant_id")
+  firstName             String    @map("first_name")
+  lastName              String    @map("last_name")
+  phone                 String?
+  isActive              Boolean   @default(true) @map("is_active")
+  lastLoginAt           DateTime? @map("last_login_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  tenant                Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  locationAssignments   UserLocationAssignment[]
+  
+  @@map("users")
+}
+
+model Location {
+  id                    String    @id @default(cuid())
+  tenantId              String    @map("tenant_id")
+  name                  String
+  code                  String
+  address               String
+  phone                 String?
+  email                 String?
+  managerId             String?   @map("manager_id")
+  publicDescription     String?   @map("public_description")
+  operationalHours      Json      @default("{}") @map("operational_hours")
+  settings              Json      @default("{}")
+  showOnCustomerPage    Boolean   @default(true) @map("show_on_customer_page")
+  isActive              Boolean   @default(true) @map("is_active")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  tenant                Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userAssignments       UserLocationAssignment[]
+  units                 Unit[]
+  
+  @@unique([tenantId, code])
+  @@unique([tenantId, name])
+  @@map("locations")
+}
+
+model UserLocationAssignment {
+  id                    String    @id @default(cuid())
+  userId                String    @map("user_id")
+  locationId            String    @map("location_id")
+  assignedBy            String    @map("assigned_by")
+  assignedAt            DateTime  @default(now()) @map("assigned_at")
+  isActive              Boolean   @default(true) @map("is_active")
+
+  // Relations
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location              Location  @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, locationId])
+  @@map("user_location_assignments")
+}
+
+model Unit {
+  id                    String      @id @default(cuid())
+  tenantId              String      @map("tenant_id")
+  locationId            String      @map("location_id")
+  name                  String
+  consoleType           String      @map("console_type")
+  controllerCount       Int         @default(1) @map("controller_count")
+  status                UnitStatus  @default(available)
+  hourlyRate            Decimal     @map("hourly_rate") @db.Decimal(8,2)
+  packageRates          Json        @default("{}") @map("package_rates")
+  specifications        Json        @default("{}")
+  showOnCustomerPage    Boolean     @default(true) @map("show_on_customer_page")
+  customerDisplayName   String?     @map("customer_display_name")
+  isActive              Boolean     @default(true) @map("is_active")
+  createdAt             DateTime    @default(now()) @map("created_at")
+  updatedAt             DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  location              Location    @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  
+  @@unique([locationId, name])
+  @@map("units")
 }
