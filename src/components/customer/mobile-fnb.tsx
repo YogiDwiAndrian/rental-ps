@@ -1,244 +1,205 @@
-// src/components/customer/mobile-fnb.tsx
 'use client'
 
-import { useState, useCallback } from 'react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { RefreshCw, Wifi, WifiOff, ChevronDown, ChevronUp, ShoppingCart } from "lucide-react"
-import { usePolling } from '@/hooks/use-polling'
-import { useMobile } from '@/hooks/use-mobile'
+import { useState } from 'react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { 
+  ChevronDown, 
+  ChevronUp, 
+  Coffee, 
+  ShoppingCart, 
+  AlertTriangle,
+  RefreshCw,
+  Utensils,
+  Package
+} from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
-
-interface FnbItem {
-  id: string
-  name: string
-  description: string | null
-  price: number
-  stockQuantity: number
-  isAvailable: boolean
-  unitType: string
-  locationName: string
-}
-
-interface CategoryGroup {
-  categoryName: string
-  items: FnbItem[]
-  locationName: string
-}
+import { FnbCategory, FnbItem } from '@/hooks/use-fnb-data'
 
 interface MobileFnbProps {
-  subdomain: string
-  initialCategories: CategoryGroup[]
+  categories: FnbCategory[]
+  loading: boolean
+  lastUpdated: Date | null
+  onRefresh: () => void
 }
 
-export default function MobileFnb({ subdomain, initialCategories }: MobileFnbProps) {
-  const [categories, setCategories] = useState<CategoryGroup[]>(initialCategories)
-  const [error, setError] = useState<string | null>(null)
-  const [isOnline, setIsOnline] = useState(true)
-  const [expandedCategory, setExpandedCategory] = useState<string | null>(null)
-  const { isMobile } = useMobile()
+export function MobileFnb({ categories, loading, lastUpdated, onRefresh }: MobileFnbProps) {
+  const [openCategories, setOpenCategories] = useState<Record<string, boolean>>({})
 
-  // Fetch F&B data
-  const fetchFnbData = useCallback(async () => {
-    try {
-      const response = await fetch(`/api/public/${subdomain}/fnb`, {
-        cache: 'no-cache'
-      })
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
-      }
-      
-      const data = await response.json()
-      
-      if (data.success) {
-        setCategories(data.data.categories)
-        setError(null)
-        setIsOnline(true)
-      } else {
-        throw new Error(data.error || 'Failed to fetch F&B data')
-      }
-    } catch (err) {
-      console.error('Error fetching F&B data:', err)
-      setError(err instanceof Error ? err.message : 'Network error')
-      setIsOnline(false)
+  const toggleCategory = (categoryName: string) => {
+    setOpenCategories(prev => ({
+      ...prev,
+      [categoryName]: !prev[categoryName]
+    }))
+  }
+
+  const getCategoryIcon = (categoryName: string) => {
+    const name = categoryName.toLowerCase()
+    if (name.includes('drink') || name.includes('beverage') || name.includes('minuman')) {
+      return <Coffee className="w-4 h-4" />
     }
-  }, [subdomain])
+    if (name.includes('food') || name.includes('makanan') || name.includes('snack')) {
+      return <Utensils className="w-4 h-4" />
+    }
+    return <Package className="w-4 h-4" />
+  }
 
-  // Setup polling every 5 minutes
-  const { isPolling, lastUpdated, refresh } = usePolling(fetchFnbData, {
-    interval: 300000, // 5 minutes
-    enabled: true,
-    immediate: false
-  })
-
-  // Get all items stats
-  const allItems = categories.flatMap(category => category.items)
-  const availableItems = allItems.filter(item => item.isAvailable)
-  const outOfStockItems = allItems.filter(item => !item.isAvailable)
-
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
+  const ItemCard = ({ item }: { item: FnbItem }) => (
+    <Card className="border-0 shadow-sm mb-3 bg-white">
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between mb-2">
           <div className="flex-1">
-            <CardTitle className="flex items-center gap-2 text-lg">
-              🍕 F&B Menu
-              {isOnline ? <Wifi className="w-4 h-4 text-green-600" /> : <WifiOff className="w-4 h-4 text-red-600" />}
-            </CardTitle>
-            <CardDescription className="text-sm">
-              {isOnline ? 'Fresh snacks & drinks • Auto-refresh 5min' : 'Connection lost'}
-            </CardDescription>
+            <h4 className="font-medium text-gray-900 mb-1">
+              {item.customerDisplayName || item.name}
+            </h4>
+            {(item.customerDescription || item.description) && (
+              <p className="text-sm text-gray-500 mb-2">
+                {item.customerDescription || item.description}
+              </p>
+            )}
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-green-600">
+                {formatCurrency(item.price)}
+              </span>
+              <span className="text-xs text-gray-500">
+                per {item.unitType}
+              </span>
+            </div>
           </div>
           
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={refresh}
-            disabled={isPolling}
-            className="ml-2"
-          >
-            <RefreshCw className={`w-3 h-3 ${isPolling ? 'animate-spin' : ''}`} />
-          </Button>
+          <div className="flex flex-col items-end gap-2">
+            {item.isAvailable && item.stockQuantity > 0 ? (
+              <>
+                <Badge className="bg-green-100 text-green-800 border-green-200">
+                  <ShoppingCart className="w-3 h-3 mr-1" />
+                  Available
+                </Badge>
+                <span className="text-xs text-gray-500">
+                  Stock: {item.stockQuantity}
+                </span>
+              </>
+            ) : (
+              <Badge className="bg-red-100 text-red-800 border-red-200">
+                <AlertTriangle className="w-3 h-3 mr-1" />
+                Out of Stock
+              </Badge>
+            )}
+          </div>
         </div>
-
-        {/* Mobile Quick Stats */}
-        {isMobile && (
-          <div className="grid grid-cols-3 gap-2 mt-3">
-            <div className="text-center p-2 bg-green-50 rounded">
-              <div className="text-lg font-bold text-green-600">{availableItems.length}</div>
-              <div className="text-xs text-green-700">Available</div>
+        
+        {/* Stock warning for low stock items */}
+        {item.isAvailable && item.stockQuantity > 0 && item.stockQuantity <= 5 && (
+          <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded-md">
+            <div className="flex items-center gap-1">
+              <AlertTriangle className="w-3 h-3 text-yellow-600" />
+              <span className="text-xs text-yellow-700">Low Stock - Only {item.stockQuantity} left!</span>
             </div>
-            <div className="text-center p-2 bg-red-50 rounded">
-              <div className="text-lg font-bold text-red-600">{outOfStockItems.length}</div>
-              <div className="text-xs text-red-700">Out of Stock</div>
-            </div>
-            <div className="text-center p-2 bg-blue-50 rounded">
-              <div className="text-lg font-bold text-blue-600">{categories.length}</div>
-              <div className="text-xs text-blue-700">Categories</div>
-            </div>
-          </div>
-        )}
-      </CardHeader>
-      
-      <CardContent className="space-y-3">
-        {error && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-            <div className="flex items-center gap-2 text-red-700">
-              <WifiOff className="w-4 h-4" />
-              <span className="text-sm font-medium">Connection Error</span>
-            </div>
-            <div className="text-red-600 text-xs mt-1">{error}</div>
-          </div>
-        )}
-
-        {/* Categories - Collapsible on Mobile */}
-        {categories.length > 0 ? (
-          <div className="space-y-2">
-            {categories.map((category, categoryIndex) => (
-              <div key={`${category.categoryName}-${categoryIndex}`} className="border rounded-lg overflow-hidden">
-                {/* Category Header - Clickable on Mobile */}
-                <div 
-                  className={`p-3 ${isMobile ? 'cursor-pointer select-none' : ''} bg-gray-50 border-b`}
-                  onClick={isMobile ? () => setExpandedCategory(
-                    expandedCategory === category.categoryName ? null : category.categoryName
-                  ) : undefined}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-medium">{category.categoryName}</h3>
-                      <Badge variant="outline" className="text-xs">
-                        {category.items.length} items
-                      </Badge>
-                      <Badge variant="default" className="text-xs bg-green-100 text-green-800">
-                        {category.items.filter(item => item.isAvailable).length} available
-                      </Badge>
-                    </div>
-                    
-                    {isMobile && (
-                      <div>
-                        {expandedCategory === category.categoryName ? 
-                          <ChevronUp className="w-4 h-4" /> : 
-                          <ChevronDown className="w-4 h-4" />}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Category Items */}
-                {(!isMobile || expandedCategory === category.categoryName) && (
-                  <div className="p-3 space-y-2">
-                    {category.items.map((item) => (
-                      <div
-                        key={item.id}
-                        className={`flex items-center justify-between p-3 border rounded-lg transition-all duration-300 ${
-                          isPolling ? 'opacity-80' : ''
-                        } ${
-                          item.isAvailable 
-                            ? 'border-gray-200 bg-white' 
-                            : 'border-red-200 bg-red-50'
-                        }`}
-                      >
-                        <div className="flex-1 min-w-0"> {/* min-w-0 for text truncation */}
-                          <div className="flex items-center gap-2">
-                            <h4 className={`font-medium text-sm ${!item.isAvailable ? 'text-gray-500' : ''}`}>
-                              {item.name}
-                            </h4>
-                            {item.isAvailable && (
-                              <ShoppingCart className="w-3 h-3 text-green-600" />
-                            )}
-                          </div>
-                          
-                          {item.description && (
-                            <p className={`text-xs mt-1 ${!item.isAvailable ? 'text-gray-400' : 'text-gray-500'} truncate`}>
-                              {item.description}
-                            </p>
-                          )}
-                          
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className="text-xs text-gray-400">
-                              Stock: {item.stockQuantity} {item.unitType}
-                            </span>
-                          </div>
-                        </div>
-                        
-                        <div className="text-right ml-3">
-                          <div className={`font-semibold text-sm ${
-                            item.isAvailable ? 'text-green-600' : 'text-gray-400'
-                          }`}>
-                            {formatCurrency(item.price)}
-                          </div>
-                          <Badge 
-                            variant={item.isAvailable ? 'default' : 'destructive'}
-                            className="text-xs mt-1"
-                          >
-                            {item.isAvailable ? 'Available' : 'Out of Stock'}
-                          </Badge>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="text-center py-8 text-gray-500">
-            <div className="text-2xl mb-2">🍽️</div>
-            <div className="text-sm">No menu items available</div>
-          </div>
-        )}
-
-        {/* Last Updated Info */}
-        {lastUpdated && (
-          <div className="text-center pt-2 border-t">
-            <span className="text-xs text-gray-500">
-              Last updated: {lastUpdated.toLocaleTimeString('id-ID')}
-            </span>
           </div>
         )}
       </CardContent>
     </Card>
+  )
+
+  const CategorySection = ({ category }: { category: FnbCategory }) => {
+    const isOpen = openCategories[category.name] ?? false
+    
+    return (
+      <Collapsible
+        open={isOpen}
+        onOpenChange={() => toggleCategory(category.name)}
+      >
+        <CollapsibleTrigger asChild>
+          <Button 
+            variant="ghost" 
+            className="w-full justify-between p-4 h-auto bg-gray-50 hover:bg-gray-100 mb-2"
+          >
+            <div className="flex items-center gap-2">
+              {getCategoryIcon(category.name)}
+              <span className="font-medium">{category.name}</span>
+              <div className="flex gap-1">
+                <Badge variant="secondary" className="bg-green-100 text-green-800">
+                  {category.availableCount} available
+                </Badge>
+                {category.totalCount - category.availableCount > 0 && (
+                  <Badge variant="secondary" className="bg-red-100 text-red-800">
+                    {category.totalCount - category.availableCount} out
+                  </Badge>
+                )}
+              </div>
+            </div>
+            {isOpen ? (
+              <ChevronUp className="h-4 w-4" />
+            ) : (
+              <ChevronDown className="h-4 w-4" />
+            )}
+          </Button>
+        </CollapsibleTrigger>
+        
+        <CollapsibleContent className="space-y-0 mb-4">
+          {category.items.map((item) => (
+            <ItemCard key={item.id} item={item} />
+          ))}
+        </CollapsibleContent>
+      </Collapsible>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card className="border-0 shadow-sm bg-emerald-50">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Coffee className="h-5 w-5 text-emerald-600" />
+              Food & Beverages
+            </CardTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onRefresh}
+              disabled={loading}
+              className="border-emerald-200 text-emerald-700 hover:bg-emerald-100"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            </Button>
+          </div>
+          {lastUpdated && (
+            <p className="text-xs text-gray-500">
+              Last updated: {lastUpdated.toLocaleTimeString()}
+            </p>
+          )}
+        </CardHeader>
+      </Card>
+
+      {/* Category Sections */}
+      {categories.map((category) => (
+        <CategorySection key={category.name} category={category} />
+      ))}
+
+      {/* Empty State */}
+      {categories.length === 0 && !loading && (
+        <Card className="border-0 shadow-sm">
+          <CardContent className="p-8 text-center">
+            <Coffee className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 mb-2">No Menu Items</h3>
+            <p className="text-gray-500">Menu items are currently being updated.</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Quick action hint */}
+      {categories.length > 0 && (
+        <Card className="border-0 shadow-sm bg-blue-50">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-sm text-blue-800">
+              <ShoppingCart className="w-4 h-4" />
+              <span>Tap on categories to browse available items</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
   )
 }

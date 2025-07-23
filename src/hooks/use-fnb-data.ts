@@ -1,169 +1,147 @@
-// src/hooks/use-fnb-data.ts
 'use client'
 
 import { useState, useCallback } from 'react'
 import { usePolling } from './use-polling'
 
+// API Response Types
+interface ApiItem {
+  id: string
+  name: string
+  description?: string
+  price: number
+  stockQuantity: number
+  unitType: string
+  isAvailable: boolean
+  locationName?: string
+}
+
+interface ApiCategory {
+  categoryName: string
+  items: ApiItem[]
+  locationName?: string
+}
+
+interface ApiFnbResponse {
+  success: boolean
+  data: {
+    categories: ApiCategory[]
+    lowStockItems: ApiItem[]
+    lastUpdated: string
+    tenant: {
+      name: string
+      subdomain: string
+    }
+  }
+}
+
 export interface FnbItem {
   id: string
   name: string
-  description: string | null
+  description?: string
   price: number
   stockQuantity: number
-  isAvailable: boolean
   unitType: string
-  locationName: string
+  categoryName?: string
+  customerDisplayName?: string
+  customerDescription?: string
+  isAvailable: boolean
+  locationName?: string
 }
 
-export interface CategoryGroup {
-  categoryName: string
-  items: FnbItem[]
-  locationName: string
-}
-
-export interface LowStockItem {
-  id: string
+export interface FnbCategory {
   name: string
-  stockQuantity: number
-  minStockAlert: number
-  locationName: string
+  items: FnbItem[]
+  availableCount: number
+  totalCount: number
 }
 
-interface UseFnbDataOptions {
-  subdomain: string
-  initialData: CategoryGroup[]
-  pollingInterval?: number
-  enabled?: boolean
-  showLowStockAlerts?: boolean
-}
-
-export function useFnbData({
-  subdomain,
-  initialData,
-  pollingInterval = 300000, // 5 minutes
-  enabled = true,
-  showLowStockAlerts = false
-}: UseFnbDataOptions) {
-  const [categories, setCategories] = useState<CategoryGroup[]>(initialData)
-  const [lowStockItems, setLowStockItems] = useState<LowStockItem[]>([])
+export function useFnbData(subdomain: string) {
+  const [items, setItems] = useState<FnbItem[]>([])
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [isOnline, setIsOnline] = useState(true)
 
-  // Fetch F&B data
-  const fetchFnbData = useCallback(async () => {
+  const fetchFnbItems = useCallback(async () => {
     try {
-      const response = await fetch(`/api/public/${subdomain}/fnb`, {
-        cache: 'no-cache'
-      })
+      setLoading(true)
+      setError(null)
+      
+      const response = await fetch(`/api/public/${subdomain}/fnb`)
       
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
       }
       
-      const data = await response.json()
+      const data: ApiFnbResponse = await response.json()
       
-      if (data.success) {
-        setCategories(data.data.categories)
-        setLowStockItems(data.data.lowStockItems || [])
-        setError(null)
-        setIsOnline(true)
+      // Handle the actual API response structure
+      if (data.success && data.data && data.data.categories) {
+        // Flatten categories into items array
+        const allItems: FnbItem[] = []
+        data.data.categories.forEach((category: ApiCategory) => {
+          if (category.items && Array.isArray(category.items)) {
+            category.items.forEach((item: ApiItem) => {
+              allItems.push({
+                ...item,
+                categoryName: category.categoryName
+              })
+            })
+          }
+        })
+        setItems(allItems)
       } else {
-        throw new Error(data.error || 'Failed to fetch F&B data')
+        setItems([])
+        console.warn('Unexpected F&B API response structure:', data)
       }
     } catch (err) {
-      console.error('Error fetching F&B data:', err)
-      setError(err instanceof Error ? err.message : 'Network error')
-      setIsOnline(false)
+      console.error('Failed to fetch F&B items:', err)
+      setError(err instanceof Error ? err.message : 'Failed to fetch F&B items')
+    } finally {
+      setLoading(false)
     }
   }, [subdomain])
 
-  // Setup polling
-  const { isPolling, lastUpdated, refresh } = usePolling(fetchFnbData, {
-    interval: pollingInterval,
-    enabled,
-    immediate: false
-  })
+  // Use existing polling hook with correct interface
+  const { lastUpdated, refresh } = usePolling(fetchFnbItems, { interval: 300000 })
 
-  // Computed values for easy consumption
-  const allItems = categories.flatMap(category => category.items)
-  
+  // Manual refresh function (use the one from usePolling)
+  // const refresh = useCallback(() => {
+  //   fetchFnbItems()
+  // }, [fetchFnbItems])
+
+  // Computed values for mobile stats
   const stats = {
-    available: allItems.filter(item => item.isAvailable).length,
-    outOfStock: allItems.filter(item => !item.isAvailable).length,
-    categories: categories.length,
-    lowStock: lowStockItems.length,
-    total: allItems.length
+    total: items.length,
+    available: items.filter(item => item.isAvailable && item.stockQuantity > 0).length,
+    outOfStock: items.filter(item => !item.isAvailable || item.stockQuantity === 0).length,
+    lowStock: items.filter(item => item.isAvailable && item.stockQuantity > 0 && item.stockQuantity <= 5).length
   }
 
-  const groupedItems = {
-    available: allItems.filter(item => item.isAvailable),
-    outOfStock: allItems.filter(item => !item.isAvailable),
-    lowStock: lowStockItems
-  }
-
-  // Category utilities
-  const getCategoryStats = (categoryName: string) => {
-    const category = categories.find(c => c.categoryName === categoryName)
-    if (!category) return { available: 0, total: 0 }
-    
-    return {
-      available: category.items.filter(item => item.isAvailable).length,
-      total: category.items.length
+  // Group items by category for mobile display
+  const categorizedItems = items.reduce<Record<string, FnbItem[]>>((acc, item) => {
+    const category = item.categoryName || 'Uncategorized'
+    if (!acc[category]) {
+      acc[category] = []
     }
-  }
+    acc[category].push(item)
+    return acc
+  }, {})
 
-  const getItemsByCategory = (categoryName: string) => {
-    const category = categories.find(c => c.categoryName === categoryName)
-    return category?.items || []
-  }
-
-  // Search functionality
-  const searchItems = (query: string) => {
-    if (!query.trim()) return allItems
-    
-    const searchTerm = query.toLowerCase()
-    return allItems.filter(item => 
-      item.name.toLowerCase().includes(searchTerm) ||
-      (item.description && item.description.toLowerCase().includes(searchTerm))
-    )
-  }
-
-  // Filter utilities
-  const filterByAvailability = (availableOnly: boolean = true) => {
-    return availableOnly ? groupedItems.available : allItems
-  }
-
-  const filterByPrice = (maxPrice?: number, minPrice?: number) => {
-    return allItems.filter(item => {
-      if (maxPrice && item.price > maxPrice) return false
-      if (minPrice && item.price < minPrice) return false
-      return true
-    })
-  }
+  // Convert to category objects with stats
+  const categories: FnbCategory[] = Object.entries(categorizedItems).map(([name, categoryItems]) => ({
+    name,
+    items: categoryItems,
+    availableCount: categoryItems.filter(item => item.isAvailable && item.stockQuantity > 0).length,
+    totalCount: categoryItems.length
+  }))
 
   return {
-    // Data
-    categories,
-    allItems,
-    lowStockItems,
-    stats,
-    groupedItems,
-    
-    // Status
-    isPolling,
-    isOnline,
+    items,
+    loading,
     error,
     lastUpdated,
-    showLowStockAlerts,
-    
-    // Actions
     refresh,
-    
-    // Utilities
-    getCategoryStats,
-    getItemsByCategory,
-    searchItems,
-    filterByAvailability,
-    filterByPrice
+    stats,
+    categories,
+    categorizedItems
   }
 }
