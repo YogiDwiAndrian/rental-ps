@@ -18,6 +18,42 @@ type LocationData = {
   code: string
 }[]
 
+// Enhanced audit logging function
+async function auditLoginAttempt(data: {
+  email: string
+  subdomain?: string
+  ip?: string
+  userAgent?: string
+  success: boolean
+  failureReason?: string
+  userId?: string
+  userRole?: string
+}) {
+  try {
+    const auditData = {
+      event: 'LOGIN_ATTEMPT',
+      email: data.email,
+      subdomain: data.subdomain || 'unknown',
+      ip: data.ip || 'unknown',
+      userAgent: data.userAgent || 'unknown',
+      success: data.success,
+      failureReason: data.failureReason,
+      userId: data.userId,
+      userRole: data.userRole,
+      timestamp: new Date().toISOString()
+    }
+    
+    // Console logging for now (will be enhanced with database logging later)
+    console.log('🔐 AUTH AUDIT:', JSON.stringify(auditData, null, 2))
+    
+    // TODO: Store in database audit table
+    // await prisma.auditLog.create({ data: auditData })
+    
+  } catch (error) {
+    console.error('❌ Failed to log audit data:', error)
+  }
+}
+
 export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(prisma),
   providers: [
@@ -28,18 +64,38 @@ export const authOptions: NextAuthOptions = {
         password: { label: "Password", type: "password" },
         subdomain: { label: "Subdomain", type: "text" }
       },
-      async authorize(credentials) {
+      async authorize(credentials, req) {
         if (!credentials?.email || !credentials?.password) {
+          await auditLoginAttempt({
+            email: credentials?.email || 'unknown',
+            subdomain: credentials?.subdomain,
+            success: false,
+            failureReason: 'EMAIL_PASSWORD_REQUIRED'
+          })
           throw new Error('EMAIL_PASSWORD_REQUIRED')
         }
 
         try {
+          // Get IP and User Agent for audit logging
+          const ip = req?.headers?.['x-forwarded-for'] || 
+                    req?.headers?.['x-real-ip'] || 
+                    'unknown'
+          const userAgent = req?.headers?.['user-agent'] || 'unknown'
+
           // Step 1: Check database connection first
           console.log('🔍 Checking database connection...')
           const dbStatus = await checkDatabaseConnection()
           
           if (!dbStatus.isConnected) {
             console.error('❌ Database connection failed:', dbStatus.error)
+            await auditLoginAttempt({
+              email: credentials.email,
+              subdomain: credentials.subdomain,
+              ip: ip as string,
+              userAgent: userAgent as string,
+              success: false,
+              failureReason: `DATABASE_CONNECTION_FAILED: ${dbStatus.error}`
+            })
             throw new Error(`DATABASE_CONNECTION_FAILED: ${dbStatus.error}`)
           }
           
@@ -62,16 +118,44 @@ export const authOptions: NextAuthOptions = {
 
           if (!user) {
             console.log('❌ User not found:', credentials.email)
+            await auditLoginAttempt({
+              email: credentials.email,
+              subdomain: credentials.subdomain,
+              ip: ip as string,
+              userAgent: userAgent as string,
+              success: false,
+              failureReason: 'USER_NOT_FOUND'
+            })
             throw new Error('USER_NOT_FOUND')
           }
 
           if (!user.passwordHash) {
             console.log('❌ User has no password hash:', credentials.email)
+            await auditLoginAttempt({
+              email: credentials.email,
+              subdomain: credentials.subdomain,
+              ip: ip as string,
+              userAgent: userAgent as string,
+              success: false,
+              failureReason: 'NO_PASSWORD_SET',
+              userId: user.id,
+              userRole: user.role
+            })
             throw new Error('NO_PASSWORD_SET')
           }
 
           if (!user.isActive) {
             console.log('❌ User account is disabled:', credentials.email)
+            await auditLoginAttempt({
+              email: credentials.email,
+              subdomain: credentials.subdomain,
+              ip: ip as string,
+              userAgent: userAgent as string,
+              success: false,
+              failureReason: 'ACCOUNT_DISABLED',
+              userId: user.id,
+              userRole: user.role
+            })
             throw new Error('ACCOUNT_DISABLED')
           }
 
@@ -84,6 +168,16 @@ export const authOptions: NextAuthOptions = {
 
           if (!isPasswordValid) {
             console.log('❌ Invalid password for user:', credentials.email)
+            await auditLoginAttempt({
+              email: credentials.email,
+              subdomain: credentials.subdomain,
+              ip: ip as string,
+              userAgent: userAgent as string,
+              success: false,
+              failureReason: 'INVALID_PASSWORD',
+              userId: user.id,
+              userRole: user.role
+            })
             throw new Error('INVALID_PASSWORD')
           }
 
@@ -92,6 +186,15 @@ export const authOptions: NextAuthOptions = {
           // Step 4: Handle super_admin (no tenant validation needed)
           if (user.role === 'super_admin') {
             console.log('✅ Super admin login successful:', credentials.email)
+            await auditLoginAttempt({
+              email: credentials.email,
+              subdomain: credentials.subdomain,
+              ip: ip as string,
+              userAgent: userAgent as string,
+              success: true,
+              userId: user.id,
+              userRole: user.role
+            })
             return {
               id: user.id,
               email: user.email,
@@ -104,19 +207,47 @@ export const authOptions: NextAuthOptions = {
           }
 
           // Step 5: For owner/staff - validate tenant is assigned
-          // At this point, user.role is either 'owner' or 'staff'
           if (!user.tenant) {
             console.log('❌ User has no tenant assigned:', credentials.email)
+            await auditLoginAttempt({
+              email: credentials.email,
+              subdomain: credentials.subdomain,
+              ip: ip as string,
+              userAgent: userAgent as string,
+              success: false,
+              failureReason: 'NO_TENANT_ASSIGNED',
+              userId: user.id,
+              userRole: user.role
+            })
             throw new Error('NO_TENANT_ASSIGNED')
           }
 
           // Step 6: Validate subdomain access for owner/staff
           if (credentials.subdomain && user.tenant.subdomain !== credentials.subdomain) {
             console.log('❌ User does not have access to tenant:', credentials.subdomain)
+            await auditLoginAttempt({
+              email: credentials.email,
+              subdomain: credentials.subdomain,
+              ip: ip as string,
+              userAgent: userAgent as string,
+              success: false,
+              failureReason: 'TENANT_ACCESS_DENIED',
+              userId: user.id,
+              userRole: user.role
+            })
             throw new Error('TENANT_ACCESS_DENIED')
           }
 
           console.log('✅ Login successful for user:', credentials.email)
+          await auditLoginAttempt({
+            email: credentials.email,
+            subdomain: credentials.subdomain,
+            ip: ip as string,
+            userAgent: userAgent as string,
+            success: true,
+            userId: user.id,
+            userRole: user.role
+          })
 
           // Step 7: Return user data for owner/staff
           return {
@@ -150,6 +281,12 @@ export const authOptions: NextAuthOptions = {
           
           // Handle unexpected errors
           console.error('Unexpected auth error:', error)
+          await auditLoginAttempt({
+            email: credentials.email,
+            subdomain: credentials.subdomain,
+            success: false,
+            failureReason: 'SYSTEM_ERROR'
+          })
           throw new Error('SYSTEM_ERROR')
         }
       }
@@ -157,10 +294,10 @@ export const authOptions: NextAuthOptions = {
   ],
   session: {
     strategy: "jwt",
-    maxAge: 24 * 60 * 60, // 24 hours
+    maxAge: 90 * 24 * 60 * 60, // 3 months (90 days)
   },
   jwt: {
-    maxAge: 24 * 60 * 60, // 24 hours
+    maxAge: 90 * 24 * 60 * 60, // 3 months (90 days)
   },
   callbacks: {
     async jwt({ token, user }) {
@@ -188,19 +325,37 @@ export const authOptions: NextAuthOptions = {
     error: '/auth/error',
   },
   events: {
-    async signIn({ user }) {
-      // Update last login time
+    async signIn({ user, account }) {
+      // Enhanced login success logging
       if (user.id) {
         try {
+          // Update last login time
           await prisma.user.update({
             where: { id: user.id },
             data: { lastLoginAt: new Date() }
           })
+          
+          // Success audit log
+          console.log('✅ LOGIN SUCCESS:', {
+            userId: user.id,
+            email: user.email,
+            role: user.role,
+            timestamp: new Date().toISOString()
+          })
+          
         } catch (error) {
           console.error('Failed to update last login time:', error)
           // Don't throw error here, login should still succeed
         }
       }
+    },
+    async signOut({ session, token }) {
+      // Logout audit log
+      console.log('🚪 LOGOUT:', {
+        userId: token?.sub || session?.user?.id,
+        email: session?.user?.email,
+        timestamp: new Date().toISOString()
+      })
     }
   }
 }

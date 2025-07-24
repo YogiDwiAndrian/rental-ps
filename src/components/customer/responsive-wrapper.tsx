@@ -1,4 +1,4 @@
-// src/components/customer/responsive-wrapper.tsx - UPDATED FOR MOBILE
+// src/components/customer/responsive-wrapper.tsx - Updated with Login Button
 'use client'
 
 import { useMobileDetection } from '@/hooks/use-mobile-detection'
@@ -11,9 +11,10 @@ import { UnitsCard } from './units-card'
 import { FnbCard } from './fnb-card'
 import { FloatingWhatsApp } from './floating-whatsapp'
 import { Footer } from './footer'
-import { MobileFooter } from './mobile-footer' // NEW: Import mobile footer
+import { MobileFooter } from './mobile-footer'
 import { LocationSelector } from './location-selector'
 import { LocationSwitcher } from './location-switcher'
+import { LoginButton } from './login-button' // NEW: Import login button
 
 // Mobile components
 import { MobileStats } from './mobile-stats'
@@ -192,7 +193,6 @@ export function ResponsiveWrapper({ subdomain }: ResponsiveWrapperProps) {
           onSwitchLocation={switchLocation}
           onShowSelector={clearSelection}
         />
-        {/* UPDATED: Use MobileFooter for mobile */}
         <MobileFooter 
           locationInfo={locationInfo}
           lastUpdated={lastUpdatedData}
@@ -221,7 +221,6 @@ export function ResponsiveWrapper({ subdomain }: ResponsiveWrapperProps) {
           onSwitchLocation={switchLocation}
           onShowSelector={clearSelection}
         />
-        {/* Keep using regular Footer for desktop */}
         <Footer 
           locationInfo={locationInfo}
           lastUpdated={lastUpdatedData}
@@ -264,7 +263,7 @@ export function ResponsiveWrapper({ subdomain }: ResponsiveWrapperProps) {
   )
 }
 
-// Layout components remain the same...
+// Layout components with LOGIN BUTTON integrated
 interface LayoutProps {
   subdomain: string
   locationInfo: LocationInfo
@@ -290,33 +289,41 @@ function MobileLayout({
 }: LayoutProps) {
   return (
     <div className="container mx-auto p-4 space-y-6 max-w-md">
-      <div className="text-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 mb-4">
-          🎮 Gaming Center
-        </h1>
+      
+      {/* NEW: Mobile Header with Login Button */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="text-center flex-1">
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">
+            🎮 Gaming Center
+          </h1>
+          <p className="text-xs text-gray-500">
+            Live status • Auto-refreshed every 30s
+          </p>
+        </div>
         
-        {hasMultipleLocations && selectedLocation && (
-          <div className="mb-4">
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
-              <div className="flex items-center gap-2 mb-2">
-                <MapPin className="w-4 h-4 text-blue-600" />
-                <span className="text-sm font-medium text-blue-800">Current Location:</span>
-              </div>
-              <LocationSwitcher
-                locations={locations}
-                selectedLocation={selectedLocation}
-                onSwitchLocation={onSwitchLocation}
-                onShowSelector={onShowSelector}
-                className="w-full"
-              />
-            </div>
-          </div>
-        )}
-        
-        <p className="text-xs text-gray-500">
-          Live status • Auto-refreshed every 30s
-        </p>
+        {/* Mobile Login Button - Top Right */}
+        <div className="flex-shrink-0">
+          <LoginButton subdomain={subdomain} className="ml-2" />
+        </div>
       </div>
+      
+      {hasMultipleLocations && selectedLocation && (
+        <div className="mb-4">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
+            <div className="flex items-center gap-2 mb-2">
+              <MapPin className="w-4 h-4 text-blue-600" />
+              <span className="text-sm font-medium text-blue-800">Current Location:</span>
+            </div>
+            <LocationSwitcher
+              locations={locations}
+              selectedLocation={selectedLocation}
+              onSwitchLocation={onSwitchLocation}
+              onShowSelector={onShowSelector}
+              className="w-full"
+            />
+          </div>
+        </div>
+      )}
 
       <MobileStats 
         unitsStats={unitsData.stats}
@@ -363,6 +370,32 @@ function DesktopLayout({
 }: LayoutProps) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50">
+      
+      {/* NEW: Desktop Header with Login Button */}
+      <header className="bg-white/80 backdrop-blur-sm border-b border-gray-200 sticky top-0 z-40">
+        <div className="container mx-auto px-6 py-4 max-w-7xl">
+          <div className="flex items-center justify-between">
+            
+            {/* Left: Logo/Title */}
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-blue-500 rounded-lg">
+                <MapPin className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold text-gray-900">
+                  {locationInfo.name}
+                </h1>
+                <p className="text-sm text-gray-600">Live Gaming Status</p>
+              </div>
+            </div>
+            
+            {/* Right: Login Button */}
+            <LoginButton subdomain={subdomain} />
+          </div>
+        </div>
+      </header>
+      
+      {/* Main Content */}
       <div className="container mx-auto p-6 space-y-8 max-w-7xl">
         <UnitsCard
           units={unitsData.units}

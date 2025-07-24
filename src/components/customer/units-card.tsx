@@ -15,7 +15,9 @@ import {
   Timer,
   MapPin,
   RefreshCw,
-  Building2
+  Building2,
+  Star,
+  TrendingDown
 } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import { Unit } from '@/hooks/use-units-data'
@@ -184,20 +186,51 @@ export function UnitsCard({
                   </span>
                 </div>
                 
-                {/* Package Pricing - Only show if exists */}
+                {/* Package Pricing - Simple version like mobile */}
                 {hasPackageRates(unit) && (
                   <div className="space-y-2">
                     <div className="flex items-center gap-1 mb-2">
                       <Package className="w-4 h-4 text-blue-500" />
                       <span className="text-sm font-medium text-blue-700">Package Deals</span>
                     </div>
-                    <div className="bg-blue-50 rounded-md p-3 space-y-1">
-                      {Object.entries(unit.specifications!.packageRates as Record<string, number>).map(([duration, price]) => (
-                        <div key={duration} className="flex justify-between text-sm">
-                          <span className="text-blue-700 font-medium">{duration.replace('hours', 'h')}</span>
-                          <span className="font-bold text-blue-800">{formatCurrency(price)}</span>
-                        </div>
-                      ))}
+                    <div className="bg-blue-50 rounded-md p-3 space-y-2">
+                      {Object.entries(unit.specifications!.packageRates as Record<string, number>)
+                        .sort(([a], [b]) => {
+                          const aHours = parseInt(a.replace(/\D/g, ''))
+                          const bHours = parseInt(b.replace(/\D/g, ''))
+                          return aHours - bHours
+                        })
+                        .map(([duration, price]) => {
+                        const hours = parseInt(duration.replace(/\D/g, ''))
+                        const hourlyEquivalent = unit.hourlyRate * hours
+                        const savings = hourlyEquivalent - price
+                        const savingsPercent = Math.round((savings / hourlyEquivalent) * 100)
+                        
+                        return (
+                          <div key={duration} className="flex justify-between items-center">
+                            <div className="flex items-center gap-2">
+                              <span className="text-blue-700 font-medium text-sm">
+                                {duration.replace('hours', 'h').replace('hour', 'h')}
+                              </span>
+                              {savings > 0 && (
+                                <Badge className="bg-green-100 text-green-800 text-xs">
+                                  Save {savingsPercent}%
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="text-right">
+                              {savings > 0 && (
+                                <div className="text-xs text-gray-500 line-through">
+                                  {formatCurrency(hourlyEquivalent)}
+                                </div>
+                              )}
+                              <span className="font-bold text-blue-800">
+                                {formatCurrency(price)}
+                              </span>
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 )}
