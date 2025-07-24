@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { usePolling } from './use-polling'
 
 // API Response Types
@@ -55,7 +55,7 @@ export interface FnbCategory {
   totalCount: number
 }
 
-export function useFnbData(subdomain: string) {
+export function useFnbData(subdomain: string, locationId?: string) {
   const [items, setItems] = useState<FnbItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -65,7 +65,23 @@ export function useFnbData(subdomain: string) {
       setLoading(true)
       setError(null)
       
-      const response = await fetch(`/api/public/${subdomain}/fnb`)
+      // Build URL with location parameter if provided
+      const url = locationId 
+        ? `/api/public/${subdomain}/fnb?locationId=${locationId}`
+        : `/api/public/${subdomain}/fnb`
+      
+      // Add timestamp to prevent caching issues when categories change
+      const timestamp = Date.now()
+      const finalUrl = `${url}${url.includes('?') ? '&' : '?'}_t=${timestamp}`
+      
+      const response = await fetch(finalUrl, {
+        // Disable cache to ensure fresh data
+        cache: 'no-cache',
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      })
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
@@ -98,15 +114,18 @@ export function useFnbData(subdomain: string) {
     } finally {
       setLoading(false)
     }
-  }, [subdomain])
+  }, [subdomain, locationId])
 
-  // Use existing polling hook with correct interface
-  const { lastUpdated, refresh } = usePolling(fetchFnbItems, { interval: 300000 })
+  // Use existing polling hook with correct interface - FIXED: Add locationId dependencies
+  const { lastUpdated, refresh } = usePolling(fetchFnbItems, { 
+    interval: 300000,
+    immediate: true 
+  })
 
-  // Manual refresh function (use the one from usePolling)
-  // const refresh = useCallback(() => {
-  //   fetchFnbItems()
-  // }, [fetchFnbItems])
+  // Force refresh when locationId changes
+  useEffect(() => {
+    fetchFnbItems()
+  }, [fetchFnbItems])
 
   // Computed values for mobile stats
   const stats = {

@@ -14,11 +14,15 @@ import {
   Zap,
   Timer,
   MapPin,
-  RefreshCw
+  RefreshCw,
+  ChevronDown,
+  Building2
 } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import { Unit } from '@/hooks/use-units-data'
+import { LocationData } from '@/hooks/use-locations'
 import { GamesTooltip } from './games-tooltip'
+import { LocationSwitcher } from './location-switcher'
 
 interface UnitsCardProps {
   units: Unit[]
@@ -32,6 +36,12 @@ interface UnitsCardProps {
     latitude?: number
     longitude?: number
   }
+  // New props for location management
+  locations?: LocationData[]
+  selectedLocation?: LocationData | null
+  hasMultipleLocations?: boolean
+  onSwitchLocation?: (location: LocationData) => void
+  onShowSelector?: () => void
 }
 
 export function UnitsCard({ 
@@ -39,7 +49,12 @@ export function UnitsCard({
   loading, 
   lastUpdated, 
   onRefresh,
-  locationInfo 
+  locationInfo,
+  locations = [],
+  selectedLocation,
+  hasMultipleLocations = false,
+  onSwitchLocation,
+  onShowSelector
 }: UnitsCardProps) {
   
   const getStatusConfig = (status: string, remainingMinutes?: number) => {
@@ -229,38 +244,90 @@ export function UnitsCard({
 
   return (
     <div className="space-y-8">
-      {/* Location Header - Streamlined */}
+      {/* Enhanced Location Header with Integrated Switcher */}
       <Card className="border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 shadow-lg">
         <CardContent className="p-6">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-start gap-4">
-              <div className="p-3 bg-blue-500 rounded-xl shadow-md">
-                <MapPin className="w-6 h-6 text-white" />
+          <div className="flex flex-col space-y-4">
+            
+            {/* Main Header Row */}
+            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+              <div className="flex items-start gap-4 flex-1">
+                <div className="p-3 bg-blue-500 rounded-xl shadow-md">
+                  <MapPin className="w-6 h-6 text-white" />
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <h1 className="text-3xl font-bold text-blue-900">
+                      🎮 Gaming Units
+                    </h1>
+                    {hasMultipleLocations && (
+                      <Badge className="bg-blue-100 text-blue-800 border-blue-200">
+                        <Building2 className="w-3 h-3 mr-1" />
+                        {locations.length} locations
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-blue-700 text-lg">{locationInfo.name}</p>
+                  <p className="text-blue-600 text-sm">{locationInfo.address}</p>
+                </div>
               </div>
-              <div>
-                <h1 className="text-3xl font-bold text-blue-900 mb-1">
-                  🎮 {locationInfo.name}
-                </h1>
-                <p className="text-blue-700 text-lg">{locationInfo.address}</p>
+              
+              <div className="flex flex-col md:items-end gap-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onRefresh}
+                  disabled={loading}
+                  className="border-blue-300 text-blue-700 hover:bg-blue-100"
+                >
+                  <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                  Refresh
+                </Button>
+                {lastUpdated && (
+                  <p className="text-xs text-blue-600">
+                    Updated: {lastUpdated.toLocaleTimeString()}
+                  </p>
+                )}
               </div>
             </div>
-            
-            <div className="text-right">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={onRefresh}
-                disabled={loading}
-                className="border-blue-300 text-blue-700 hover:bg-blue-100"
-              >
-                <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                Refresh
-              </Button>
-              {lastUpdated && (
-                <p className="text-xs text-blue-600 mt-2">
-                  Updated: {lastUpdated.toLocaleTimeString()}
-                </p>
-              )}
+
+            {/* Location Switcher Row - Prominently Displayed */}
+            {hasMultipleLocations && selectedLocation && onSwitchLocation && (
+              <div className="border-t border-blue-200 pt-4">
+                <div className="flex items-center gap-3 mb-3">
+                  <MapPin className="w-5 h-5 text-blue-600" />
+                  <span className="text-sm font-medium text-blue-800">
+                    Choose Location to View Units:
+                  </span>
+                </div>
+                <LocationSwitcher
+                  locations={locations}
+                  selectedLocation={selectedLocation}
+                  onSwitchLocation={onSwitchLocation}
+                  onShowSelector={onShowSelector}
+                  className="max-w-md"
+                />
+              </div>
+            )}
+
+            {/* Quick Stats */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-blue-200">
+              <div className="text-center">
+                <div className="text-2xl font-bold text-emerald-600">{availableUnits.length}</div>
+                <div className="text-xs text-gray-600">Available</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-orange-600">{occupiedUnits.length}</div>
+                <div className="text-xs text-gray-600">In Use</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-yellow-600">{maintenanceUnits.length}</div>
+                <div className="text-xs text-gray-600">Maintenance</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-red-600">{brokenUnits.length}</div>
+                <div className="text-xs text-gray-600">Out of Order</div>
+              </div>
             </div>
           </div>
         </CardContent>

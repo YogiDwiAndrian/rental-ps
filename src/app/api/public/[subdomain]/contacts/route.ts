@@ -25,6 +25,8 @@ interface AvailabilitySchedule {
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { subdomain } = await params
+    const { searchParams } = new URL(request.url)
+    const locationId = searchParams.get('locationId')
 
     // Validate subdomain
     if (!subdomain || subdomain.length < 2) {
@@ -33,6 +35,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         { status: 400 }
       )
     }
+
+    // Build location filter - FIXED: Use proper where clause
+    const locationWhereClause = locationId 
+      ? { 
+          isActive: true,
+          showOnCustomerPage: true,
+          id: locationId  // Filter specific location
+        }
+      : { 
+          isActive: true,
+          showOnCustomerPage: true 
+        }
 
     // Get tenant and WhatsApp contacts
     const tenant = await prisma.tenant.findUnique({
@@ -43,10 +57,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       },
       include: {
         locations: {
-          where: { 
-            isActive: true,
-            showOnCustomerPage: true 
-          },
+          where: locationWhereClause,
           include: {
             whatsappContacts: {
               where: {
@@ -102,13 +113,26 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       )
     }
 
+    // If locationId specified but no locations found, return error
+    if (locationId && tenant.locations.length === 0) {
+      return NextResponse.json(
+        { error: 'Location not found' },
+        { status: 404 }
+      )
+    }
+
     // Combine global and location-specific contacts
     const allContacts = [
-      ...tenant.whatsappContacts, // Global contacts
+      // Global contacts (always included)
+      ...tenant.whatsappContacts.map(contact => ({
+        ...contact,
+        locationName: null as string | null
+      })),
+      // Location-specific contacts
       ...tenant.locations.flatMap(location => 
         location.whatsappContacts.map(contact => ({
           ...contact,
-          locationName: location.name // Add locationName property
+          locationName: location.name
         }))
       )
     ]
@@ -121,7 +145,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       role: contact.role,
       isPrimary: contact.isPrimary,
       responseTime: contact.responseTime,
-      locationName: 'locationName' in contact ? contact.locationName : null,
+      locationName: contact.locationName,
       displayOrder: contact.displayOrder,
       // Determine if contact is currently "online" based on availability schedule
       isOnline: isContactOnline(contact.availabilitySchedule),
@@ -133,6 +157,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       success: true,
       data: {
         contacts: publicContacts,
+        locationFilter: locationId ? { 
+          locationId, 
+          locationName: tenant.locations[0]?.name 
+        } : null,
         tenant: {
           name: tenant.name,
           subdomain: tenant.subdomain

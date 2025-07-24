@@ -127,18 +127,25 @@ export function useLocations(subdomain: string) {
   }, [router, searchParams])
 
   // Check if should show location selector page
-  const shouldShowSelector = !loading && !error && locations.length > 2 && !selectedLocation
+  const shouldShowSelector = !loading && !error && locations.length > 1 && !selectedLocation
 
-  // Get location-specific data hooks
-  const getLocationSpecificHooks = (locationId?: string) => {
+  // Get location-specific data hooks parameters - FIXED
+  const getLocationSpecificHooks = useCallback((locationId?: string) => {
     const targetLocationId = locationId || selectedLocation?.id
+    
+    console.log("🔧 getLocationSpecificHooks called:", {
+      inputLocationId: locationId,
+      selectedLocationId: selectedLocation?.id,
+      targetLocationId,
+      selectedLocationName: selectedLocation?.name
+    })
     
     return {
       locationId: targetLocationId,
       locationCode: selectedLocation?.code,
       apiParams: targetLocationId ? `?locationId=${targetLocationId}` : ''
     }
-  }
+  }, [selectedLocation])
 
   return {
     // Location data

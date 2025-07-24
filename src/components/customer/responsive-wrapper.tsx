@@ -3,9 +3,9 @@
 import { useMobileDetection } from '@/hooks/use-mobile-detection'
 import { useUnitsData } from '@/hooks/use-units-data'
 import { useFnbData } from '@/hooks/use-fnb-data'
-import { useLocationData } from '@/hooks/use-location-data'
+import { MapPin } from 'lucide-react'
 import { useWhatsAppContacts } from '@/hooks/use-whatsapp-contacts'
-import { useLocations } from '@/hooks/use-locations'
+import { useLocations, LocationData } from '@/hooks/use-locations'
 import { UnitsCard } from './units-card'
 import { FnbCard } from './fnb-card'
 import { FloatingWhatsApp } from './floating-whatsapp'
@@ -22,6 +22,29 @@ interface ResponsiveWrapperProps {
   subdomain: string
 }
 
+interface WhatsAppContactFormatted {
+  name: string
+  role: 'owner' | 'manager' | 'staff' | 'custom'
+  number: string
+  isOnline: boolean
+  responseTime?: string
+}
+
+interface LocationInfo {
+  name: string
+  address: string
+  phone?: string
+  whatsapp?: string
+  operationalHours?: Record<string, { open: string; close: string }>
+  latitude?: number
+  longitude?: number
+}
+
+interface LastUpdatedData {
+  units?: Date | null
+  fnb?: Date | null
+}
+
 export function ResponsiveWrapper({ subdomain }: ResponsiveWrapperProps) {
   const { isMobile, isDesktop, isLoading: deviceLoading } = useMobileDetection()
   
@@ -34,16 +57,27 @@ export function ResponsiveWrapper({ subdomain }: ResponsiveWrapperProps) {
     loading: locationsLoading,
     error: locationsError,
     switchLocation,
-    clearSelection
+    clearSelection,
+    getLocationSpecificHooks
   } = useLocations(subdomain)
   
-  // Data hooks - these will need location-specific queries
-  const unitsData = useUnitsData(subdomain)
-  const fnbData = useFnbData(subdomain)
-  const { contacts: dynamicContacts } = useWhatsAppContacts(subdomain)
+  // SIMPLIFIED: Use selectedLocation.id directly instead of getLocationSpecificHooks()
+  const currentLocationId = selectedLocation?.id
+  
+  console.log("🔍 Current Location Debug:", {
+    selectedLocation: selectedLocation?.name,
+    currentLocationId,
+    hasMultipleLocations,
+    shouldShowSelector
+  })
+  
+  // Data hooks with direct location ID
+  const unitsData = useUnitsData(subdomain, currentLocationId)
+  const fnbData = useFnbData(subdomain, currentLocationId)
+  const { contacts: dynamicContacts } = useWhatsAppContacts(subdomain, currentLocationId)
   
   // Get location data for the selected location
-  const locationData = selectedLocation ? {
+  const locationData: LocationInfo | null = selectedLocation ? {
     name: selectedLocation.name,
     address: selectedLocation.address,
     phone: selectedLocation.phone,
@@ -94,7 +128,7 @@ export function ResponsiveWrapper({ subdomain }: ResponsiveWrapperProps) {
   }
 
   // Fallback location info if no specific location selected
-  const locationInfo = locationData || {
+  const locationInfo: LocationInfo = locationData || {
     name: `${subdomain.charAt(0).toUpperCase() + subdomain.slice(1)} Gaming Center`,
     address: `Jl. Gaming Street, ${subdomain.charAt(0).toUpperCase() + subdomain.slice(1)}`,
     phone: '+628',
@@ -102,7 +136,7 @@ export function ResponsiveWrapper({ subdomain }: ResponsiveWrapperProps) {
   }
 
   // Prepare WhatsApp contacts from dynamic data
-  const whatsappContacts = dynamicContacts.length > 0 ? dynamicContacts.map(contact => ({
+  const whatsappContacts: WhatsAppContactFormatted[] = dynamicContacts.length > 0 ? dynamicContacts.map(contact => ({
     name: contact.name,
     role: contact.role,
     number: contact.whatsappNumber,
@@ -110,8 +144,9 @@ export function ResponsiveWrapper({ subdomain }: ResponsiveWrapperProps) {
     responseTime: contact.responseTime
   })) : []
   
-  // Add fallback contacts if no dynamic contacts
+  // Add fallback contacts if no dynamic contacts - BUT ONLY if really empty
   if (whatsappContacts.length === 0) {
+    console.log('🚨 No dynamic contacts found, adding fallback contacts')
     if (locationInfo.whatsapp) {
       whatsappContacts.push({
         name: 'Customer Service',
@@ -130,6 +165,13 @@ export function ResponsiveWrapper({ subdomain }: ResponsiveWrapperProps) {
         responseTime: '10 minutes'
       })
     }
+  } else {
+    console.log(`✅ Found ${whatsappContacts.length} dynamic contacts:`, whatsappContacts.map(c => c.name))
+  }
+
+  const lastUpdatedData: LastUpdatedData = {
+    units: unitsData.lastUpdated,
+    fnb: fnbData.lastUpdated
   }
 
   if (isMobile) {
@@ -148,11 +190,7 @@ export function ResponsiveWrapper({ subdomain }: ResponsiveWrapperProps) {
         />
         <Footer 
           locationInfo={locationInfo}
-          lastUpdated={{
-            units: unitsData.lastUpdated,
-            fnb: fnbData.lastUpdated
-          }}
-          subdomain={subdomain}
+          lastUpdated={lastUpdatedData}
         />
         {whatsappContacts.length > 0 && (
           <FloatingWhatsApp 
@@ -180,11 +218,7 @@ export function ResponsiveWrapper({ subdomain }: ResponsiveWrapperProps) {
         />
         <Footer 
           locationInfo={locationInfo}
-          lastUpdated={{
-            units: unitsData.lastUpdated,
-            fnb: fnbData.lastUpdated
-          }}
-          subdomain={subdomain}
+          lastUpdated={lastUpdatedData}
         />
         {whatsappContacts.length > 0 && (
           <FloatingWhatsApp 
@@ -212,11 +246,7 @@ export function ResponsiveWrapper({ subdomain }: ResponsiveWrapperProps) {
       />
       <Footer 
         locationInfo={locationInfo}
-        lastUpdated={{
-          units: unitsData.lastUpdated,
-          fnb: fnbData.lastUpdated
-        }}
-        subdomain={subdomain}
+        lastUpdated={lastUpdatedData}
       />
       {whatsappContacts.length > 0 && (
         <FloatingWhatsApp 
@@ -228,7 +258,19 @@ export function ResponsiveWrapper({ subdomain }: ResponsiveWrapperProps) {
   )
 }
 
-// Enhanced Mobile Layout with Location Switcher
+// Enhanced Mobile Layout with proper types
+interface LayoutProps {
+  subdomain: string
+  locationInfo: LocationInfo
+  unitsData: ReturnType<typeof useUnitsData>
+  fnbData: ReturnType<typeof useFnbData>
+  locations: LocationData[]
+  selectedLocation: LocationData | null
+  hasMultipleLocations: boolean
+  onSwitchLocation: (location: LocationData) => void
+  onShowSelector: () => void
+}
+
 function MobileLayout({ 
   subdomain, 
   locationInfo,
@@ -239,17 +281,7 @@ function MobileLayout({
   hasMultipleLocations,
   onSwitchLocation,
   onShowSelector
-}: {
-  subdomain: string
-  locationInfo: { name: string; address: string; phone?: string; whatsapp?: string }
-  unitsData: ReturnType<typeof useUnitsData>
-  fnbData: ReturnType<typeof useFnbData>
-  locations: any[]
-  selectedLocation: any
-  hasMultipleLocations: boolean
-  onSwitchLocation: (location: any) => void
-  onShowSelector: () => void
-}) {
+}: LayoutProps) {
   return (
     <div className="container mx-auto p-4 space-y-6 max-w-md">
       {/* Mobile Header with Location Switcher */}
@@ -261,13 +293,19 @@ function MobileLayout({
         {/* Location Switcher for Mobile */}
         {hasMultipleLocations && selectedLocation && (
           <div className="mb-4">
-            <LocationSwitcher
-              locations={locations}
-              selectedLocation={selectedLocation}
-              onSwitchLocation={onSwitchLocation}
-              onShowSelector={onShowSelector}
-              className="w-full"
-            />
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
+              <div className="flex items-center gap-2 mb-2">
+                <MapPin className="w-4 h-4 text-blue-600" />
+                <span className="text-sm font-medium text-blue-800">Current Location:</span>
+              </div>
+              <LocationSwitcher
+                locations={locations}
+                selectedLocation={selectedLocation}
+                onSwitchLocation={onSwitchLocation}
+                onShowSelector={onShowSelector}
+                className="w-full"
+              />
+            </div>
           </div>
         )}
         
@@ -311,7 +349,7 @@ function MobileLayout({
   )
 }
 
-// Enhanced Desktop Layout with Location Switcher
+// Enhanced Desktop Layout with proper types
 function DesktopLayout({ 
   subdomain, 
   locationInfo,
@@ -322,32 +360,12 @@ function DesktopLayout({
   hasMultipleLocations,
   onSwitchLocation,
   onShowSelector
-}: { 
-  subdomain: string
-  locationInfo: { name: string; address: string; phone?: string; whatsapp?: string }
-  unitsData: ReturnType<typeof useUnitsData>
-  fnbData: ReturnType<typeof useFnbData>
-  locations: any[]
-  selectedLocation: any
-  hasMultipleLocations: boolean
-  onSwitchLocation: (location: any) => void
-  onShowSelector: () => void
-}) {
+}: LayoutProps) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50">
       <div className="container mx-auto p-6 space-y-8 max-w-7xl">
         
-        {/* Location Switcher for Desktop */}
-        {hasMultipleLocations && selectedLocation && (
-          <div className="max-w-md">
-            <LocationSwitcher
-              locations={locations}
-              selectedLocation={selectedLocation}
-              onSwitchLocation={onSwitchLocation}
-              onShowSelector={onShowSelector}
-            />
-          </div>
-        )}
+        {/* Location Switcher for Desktop - Remove since it's now in UnitsCard */}
 
         {/* PRIORITY ORDER: Units First (most important) */}
         <UnitsCard
@@ -356,6 +374,11 @@ function DesktopLayout({
           lastUpdated={unitsData.lastUpdated}
           onRefresh={unitsData.refresh}
           locationInfo={locationInfo}
+          locations={locations}
+          selectedLocation={selectedLocation}
+          hasMultipleLocations={hasMultipleLocations}
+          onSwitchLocation={onSwitchLocation}
+          onShowSelector={onShowSelector}
         />
         
         {/* F&B Second (also important for revenue) */}

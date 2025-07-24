@@ -10,6 +10,8 @@ interface RouteParams {
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { subdomain } = await params
+    const { searchParams } = new URL(request.url)
+    const locationId = searchParams.get('locationId')
 
     // Validate subdomain
     if (!subdomain || subdomain.length < 2) {
@@ -18,6 +20,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         { status: 400 }
       )
     }
+
+    // Build location filter - FIXED: Use proper where clause
+    const locationWhereClause = locationId 
+      ? { 
+          isActive: true,
+          showOnCustomerPage: true,
+          id: locationId  // Filter specific location
+        }
+      : { 
+          isActive: true,
+          showOnCustomerPage: true 
+        }
 
     // Get tenant and units data
     const tenant = await prisma.tenant.findUnique({
@@ -28,10 +42,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       },
       include: {
         locations: {
-          where: { 
-            isActive: true,
-            showOnCustomerPage: true 
-          },
+          where: locationWhereClause,
           include: {
             units: {
               where: { 
@@ -62,6 +73,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (!tenant) {
       return NextResponse.json(
         { error: 'Tenant not found' },
+        { status: 404 }
+      )
+    }
+
+    // If locationId specified but no locations found, return error
+    if (locationId && tenant.locations.length === 0) {
+      return NextResponse.json(
+        { error: 'Location not found' },
         { status: 404 }
       )
     }
@@ -99,6 +118,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           estimatedEndTime,
           customerDisplayName: unit.customerDisplayName,
           locationName: location.name,
+          locationId: location.id,
           // Include specifications and package rates
           specifications: unit.specifications || {},
           packageRates: unit.packageRates || {}
@@ -111,6 +131,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       success: true,
       data: {
         units: unitsWithStatus,
+        locationFilter: locationId ? { locationId, locationName: tenant.locations[0]?.name } : null,
         lastUpdated: new Date().toISOString(),
         tenant: {
           name: tenant.name,

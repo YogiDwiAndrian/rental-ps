@@ -1,5 +1,4 @@
 import { ResponsiveWrapper } from '@/components/customer/responsive-wrapper'
-import { useLocationData } from '@/hooks/use-location-data'
 
 export default async function CustomerPage({ 
   params 

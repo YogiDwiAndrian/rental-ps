@@ -18,12 +18,14 @@ interface FnbItem {
   isAvailable: boolean
   unitType: string
   locationName: string
+  locationId: string
 }
 
 interface CategoryGroup {
   categoryName: string
   items: FnbItem[]
   locationName: string
+  locationId: string
 }
 
 interface LowStockItem {
@@ -32,11 +34,14 @@ interface LowStockItem {
   stockQuantity: number
   minStockAlert: number
   locationName: string
+  locationId: string
 }
 
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { subdomain } = await params
+    const { searchParams } = new URL(request.url)
+    const locationId = searchParams.get('locationId')
 
     // Validate subdomain
     if (!subdomain || subdomain.length < 2) {
@@ -45,6 +50,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         { status: 400 }
       )
     }
+
+    // Build location filter - FIXED: Use proper where clause
+    const locationWhereClause = locationId 
+      ? { 
+          isActive: true,
+          showOnCustomerPage: true,
+          id: locationId  // Filter specific location
+        }
+      : { 
+          isActive: true,
+          showOnCustomerPage: true 
+        }
 
     // Get tenant and F&B data
     const tenant = await prisma.tenant.findUnique({
@@ -55,10 +72,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       },
       include: {
         locations: {
-          where: { 
-            isActive: true,
-            showOnCustomerPage: true 
-          },
+          where: locationWhereClause,
           include: {
             fnbItems: {
               where: { 
@@ -100,6 +114,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       )
     }
 
+    // If locationId specified but no locations found, return error
+    if (locationId && tenant.locations.length === 0) {
+      return NextResponse.json(
+        { error: 'Location not found' },
+        { status: 404 }
+      )
+    }
+
     // Organize F&B items by category with proper typing
     const categorizedItems: CategoryGroup[] = []
 
@@ -118,7 +140,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           stockQuantity: item.stockQuantity,
           isAvailable: item.stockQuantity > 0,
           unitType: item.unitType,
-          locationName: location.name
+          locationName: location.name,
+          locationId: location.id
         }
 
         if (!categoryMap.has(categoryName)) {
@@ -133,7 +156,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         categorizedItems.push({
           categoryName,
           items,
-          locationName: location.name
+          locationName: location.name,
+          locationId: location.id
         })
       }
     }
@@ -149,7 +173,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             name: item.customerDisplayName || item.name,
             stockQuantity: item.stockQuantity,
             minStockAlert: item.minStockAlert,
-            locationName: location.name
+            locationName: location.name,
+            locationId: location.id
           })
         }
       }
@@ -160,6 +185,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       data: {
         categories: categorizedItems,
         lowStockItems,
+        locationFilter: locationId ? { 
+          locationId, 
+          locationName: tenant.locations[0]?.name 
+        } : null,
         lastUpdated: new Date().toISOString(),
         tenant: {
           name: tenant.name,

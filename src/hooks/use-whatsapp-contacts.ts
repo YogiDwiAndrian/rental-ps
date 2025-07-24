@@ -1,7 +1,7 @@
 // src/hooks/use-whatsapp-contacts.ts
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { usePolling } from './use-polling'
 
 export interface WhatsAppContact {
@@ -29,7 +29,7 @@ interface ApiContactsResponse {
   }
 }
 
-export function useWhatsAppContacts(subdomain: string) {
+export function useWhatsAppContacts(subdomain: string, locationId?: string) {
   const [contacts, setContacts] = useState<WhatsAppContact[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -39,7 +39,12 @@ export function useWhatsAppContacts(subdomain: string) {
       setLoading(true)
       setError(null)
       
-      const response = await fetch(`/api/public/${subdomain}/contacts`)
+      // Build URL with location parameter if provided
+      const url = locationId 
+        ? `/api/public/${subdomain}/contacts?locationId=${locationId}`
+        : `/api/public/${subdomain}/contacts`
+      
+      const response = await fetch(url)
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
@@ -48,7 +53,17 @@ export function useWhatsAppContacts(subdomain: string) {
       const data: ApiContactsResponse = await response.json()
       
       if (data.success && data.data && data.data.contacts) {
-        setContacts(data.data.contacts)
+        // Filter contacts by location if specified
+        let filteredContacts = data.data.contacts
+        
+        if (locationId) {
+          filteredContacts = data.data.contacts.filter(contact => 
+            // Include global contacts (no locationName) and location-specific contacts
+            !contact.locationName || contact.locationName === locationId
+          )
+        }
+        
+        setContacts(filteredContacts)
       } else {
         setContacts([])
         console.warn('Unexpected contacts API response structure:', data)
@@ -63,10 +78,18 @@ export function useWhatsAppContacts(subdomain: string) {
     } finally {
       setLoading(false)
     }
-  }, [subdomain])
+  }, [subdomain, locationId])
 
-  // Poll every 5 minutes (contacts don't change frequently)
-  const { lastUpdated, refresh } = usePolling(fetchContacts, { interval: 300000 })
+  // Poll every 5 minutes (contacts don't change frequently) - FIXED: Add locationId dependencies
+  const { lastUpdated, refresh } = usePolling(fetchContacts, { 
+    interval: 300000,
+    immediate: true 
+  })
+
+  // Force refresh when locationId changes
+  useEffect(() => {
+    fetchContacts()
+  }, [fetchContacts])
 
   // Group contacts by type for different display purposes
   const groupedContacts = {
