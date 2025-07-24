@@ -1,4 +1,4 @@
-// src/hooks/use-locations.ts
+// src/hooks/use-locations.ts - FIXED VERSION
 'use client'
 
 import { useState, useCallback, useEffect } from 'react'
@@ -52,6 +52,7 @@ export function useLocations(subdomain: string) {
 
   const fetchLocations = useCallback(async () => {
     try {
+      console.log(`🔍 Fetching locations for subdomain: ${subdomain}`)
       setLoading(true)
       setError(null)
       
@@ -62,60 +63,83 @@ export function useLocations(subdomain: string) {
       }
       
       const data: LocationsApiResponse = await response.json()
+      console.log('📍 Locations API Response:', data)
       
       if (data.success && data.data && data.data.locations) {
         setLocations(data.data.locations)
+        console.log(`✅ Found ${data.data.locations.length} locations`)
         
-        // Determine selected location based on URL params or default
+        // For single location, auto-select it
+        if (data.data.locations.length === 1) {
+          const singleLocation = data.data.locations[0]
+          console.log(`🎯 Auto-selecting single location: ${singleLocation.name}`)
+          setSelectedLocation(singleLocation)
+          return
+        }
+        
+        // For multiple locations, check URL params
         const locationParam = searchParams.get('location')
         let targetLocation: LocationData | null = null
         
         if (locationParam) {
-          // Find by code or name
+          console.log(`🔍 Looking for location param: ${locationParam}`)
           targetLocation = data.data.locations.find(loc => 
             loc.code.toLowerCase() === locationParam.toLowerCase() ||
             loc.name.toLowerCase().includes(locationParam.toLowerCase())
           ) || null
+          
+          if (targetLocation) {
+            console.log(`✅ Found location from param: ${targetLocation.name}`)
+          } else {
+            console.log(`❌ Location param '${locationParam}' not found`)
+          }
         }
         
-        // Fallback to default location (first one)
+        // Fallback to default location (first one) for multiple locations
         if (!targetLocation && data.data.defaultLocation) {
           targetLocation = data.data.defaultLocation
+          console.log(`📍 Using default location: ${targetLocation.name}`)
         }
         
         setSelectedLocation(targetLocation)
       } else {
+        console.error('❌ Invalid locations API response:', data)
         setLocations([])
         setSelectedLocation(null)
-        console.warn('Unexpected locations API response structure:', data)
       }
     } catch (err) {
-      console.error('Failed to fetch locations:', err)
+      console.error('❌ Failed to fetch locations:', err)
       setError(err instanceof Error ? err.message : 'Failed to fetch locations')
     } finally {
       setLoading(false)
     }
   }, [subdomain, searchParams])
 
-  // Fetch locations on mount
+  // Fetch locations on mount and when subdomain changes
   useEffect(() => {
-    fetchLocations()
+    if (subdomain) {
+      fetchLocations()
+    }
   }, [fetchLocations])
 
   // Function to switch location and update URL
   const switchLocation = useCallback((location: LocationData) => {
+    console.log(`🔄 Switching to location: ${location.name}`)
     setSelectedLocation(location)
     
-    // Update URL with location parameter
-    const params = new URLSearchParams(searchParams.toString())
-    params.set('location', location.code.toLowerCase())
-    
-    // Use replace to avoid adding to history stack
-    router.replace(`?${params.toString()}`, { scroll: false })
-  }, [router, searchParams])
+    // Update URL with location parameter - only for multiple locations
+    if (locations.length > 1) {
+      const params = new URLSearchParams(searchParams.toString())
+      params.set('location', location.code.toLowerCase())
+      
+      // Use replace to avoid adding to history stack
+      router.replace(`?${params.toString()}`, { scroll: false })
+    }
+  }, [router, searchParams, locations.length])
 
   // Function to clear location selection (go to selector)
   const clearSelection = useCallback(() => {
+    console.log('🗑️ Clearing location selection')
     setSelectedLocation(null)
     
     // Remove location parameter from URL
@@ -129,16 +153,23 @@ export function useLocations(subdomain: string) {
   // Check if should show location selector page
   const shouldShowSelector = !loading && !error && locations.length > 1 && !selectedLocation
 
-  // Get location-specific data hooks parameters - FIXED
+  // Debug log current state
+  useEffect(() => {
+    console.log('🔍 useLocations State Update:', {
+      subdomain,
+      locationCount: locations.length,
+      selectedLocationName: selectedLocation?.name,
+      selectedLocationId: selectedLocation?.id,
+      hasMultipleLocations: locations.length > 1,
+      shouldShowSelector,
+      loading,
+      error
+    })
+  }, [subdomain, locations, selectedLocation, shouldShowSelector, loading, error])
+
+  // Get location-specific data hooks parameters
   const getLocationSpecificHooks = useCallback((locationId?: string) => {
     const targetLocationId = locationId || selectedLocation?.id
-    
-    console.log("🔧 getLocationSpecificHooks called:", {
-      inputLocationId: locationId,
-      selectedLocationId: selectedLocation?.id,
-      targetLocationId,
-      selectedLocationName: selectedLocation?.name
-    })
     
     return {
       locationId: targetLocationId,

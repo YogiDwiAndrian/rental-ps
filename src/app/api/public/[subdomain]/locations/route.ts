@@ -1,4 +1,4 @@
-// src/app/api/public/[subdomain]/locations/route.ts
+// src/app/api/public/[subdomain]/locations/route.ts - FIXED VERSION
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 
@@ -12,8 +12,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { subdomain } = await params
 
+    console.log(`🔍 Locations API called for subdomain: ${subdomain}`)
+
     // Validate subdomain
     if (!subdomain || subdomain.length < 2) {
+      console.error('❌ Invalid subdomain:', subdomain)
       return NextResponse.json(
         { error: 'Invalid subdomain' },
         { status: 400 }
@@ -74,38 +77,55 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     })
 
     if (!tenant) {
+      console.error(`❌ Tenant not found for subdomain: ${subdomain}`)
       return NextResponse.json(
         { error: 'Tenant not found' },
         { status: 404 }
       )
     }
 
-    // Transform locations data
-    const locationsData = tenant.locations.map(location => ({
-      id: location.id,
-      name: location.name,
-      code: location.code,
-      address: location.address,
-      phone: location.phone,
-      email: location.email,
-      publicDescription: location.publicDescription,
-      operationalHours: location.operationalHours as Record<string, { open: string; close: string }> || {},
-      latitude: location.latitude ? Number(location.latitude) : undefined,
-      longitude: location.longitude ? Number(location.longitude) : undefined,
-      
-      // Stats for location selector
-      stats: {
-        totalUnits: location.units.length,
-        availableUnits: location.units.filter(u => u.status === 'available').length,
-        occupiedUnits: location.units.filter(u => u.status === 'occupied').length,
-        totalFnbItems: location.fnbItems.length,
-        availableFnbItems: location.fnbItems.filter(item => item.stockQuantity > 0).length,
-        totalContacts: location.whatsappContacts.length,
-        primaryContacts: location.whatsappContacts.filter(c => c.isPrimary).length
-      }
-    }))
+    console.log(`✅ Found tenant: ${tenant.name} with ${tenant.locations.length} locations`)
 
-    const response = NextResponse.json({
+    // Transform locations data with proper type safety
+    const locationsData = tenant.locations.map(location => {
+      // Parse operational hours safely
+      let operationalHours: Record<string, { open: string; close: string }> = {}
+      try {
+        if (location.operationalHours && typeof location.operationalHours === 'object') {
+          operationalHours = location.operationalHours as Record<string, { open: string; close: string }>
+        }
+      } catch (error) {
+        console.warn(`⚠️ Invalid operational hours for location ${location.name}:`, error)
+      }
+
+      return {
+        id: location.id,
+        name: location.name,
+        code: location.code,
+        address: location.address,
+        phone: location.phone,
+        email: location.email,
+        publicDescription: location.publicDescription,
+        operationalHours,
+        latitude: location.latitude ? Number(location.latitude) : undefined,
+        longitude: location.longitude ? Number(location.longitude) : undefined,
+        
+        // Stats for location selector
+        stats: {
+          totalUnits: location.units.length,
+          availableUnits: location.units.filter(u => u.status === 'available').length,
+          occupiedUnits: location.units.filter(u => u.status === 'occupied').length,
+          totalFnbItems: location.fnbItems.length,
+          availableFnbItems: location.fnbItems.filter(item => item.stockQuantity > 0).length,
+          totalContacts: location.whatsappContacts.length,
+          primaryContacts: location.whatsappContacts.filter(c => c.isPrimary).length
+        }
+      }
+    })
+
+    console.log(`📍 Processed ${locationsData.length} locations:`, locationsData.map(l => l.name))
+
+    const responseData = {
       success: true,
       data: {
         tenant: {
@@ -118,7 +138,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         locationCount: locationsData.length,
         lastUpdated: new Date().toISOString()
       }
-    })
+    }
+
+    console.log(`✅ Returning response with ${locationsData.length} locations`)
+
+    const response = NextResponse.json(responseData)
 
     // Cache for 10 minutes (locations don't change frequently)
     response.headers.set('Cache-Control', 'public, max-age=600, stale-while-revalidate=1200')
@@ -126,9 +150,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     return response
 
   } catch (error) {
-    console.error('Error fetching locations:', error)
+    console.error('❌ Error fetching locations:', error)
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', details: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }
     )
   }

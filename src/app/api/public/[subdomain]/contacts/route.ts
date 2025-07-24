@@ -1,4 +1,4 @@
-// src/app/api/public/[subdomain]/contacts/route.ts
+// src/app/api/public/[subdomain]/contacts/route.ts - ENHANCED VERSION
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { JsonValue } from '@prisma/client/runtime/library'
@@ -107,6 +107,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     })
 
     if (!tenant) {
+      console.error(`❌ Tenant not found for subdomain: ${subdomain}`)
       return NextResponse.json(
         { error: 'Tenant not found' },
         { status: 404 }
@@ -137,23 +138,34 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       )
     ]
 
-    // Transform contacts for public API
-    const publicContacts = allContacts.map(contact => ({
-      id: contact.id,
-      name: contact.name,
-      whatsappNumber: contact.whatsappNumber,
-      role: contact.role,
-      isPrimary: contact.isPrimary,
-      responseTime: contact.responseTime,
-      locationName: contact.locationName,
-      displayOrder: contact.displayOrder,
-      // Determine if contact is currently "online" based on availability schedule
-      isOnline: isContactOnline(contact.availabilitySchedule),
-      // Get availability info
-      currentAvailability: getCurrentAvailability(contact.availabilitySchedule)
-    }))
+    // Transform contacts for public API with enhanced availability
+    const publicContacts = allContacts.map(contact => {
+      const availabilitySchedule = parseAvailabilitySchedule(contact.availabilitySchedule)
+      const isOnline = isContactOnline(contact.availabilitySchedule)
+      const currentAvailability = getCurrentAvailability(contact.availabilitySchedule)
 
-    const response = NextResponse.json({
+      return {
+        id: contact.id,
+        name: contact.name,
+        whatsappNumber: contact.whatsappNumber,
+        role: contact.role,
+        isPrimary: contact.isPrimary,
+        responseTime: contact.responseTime,
+        locationName: contact.locationName,
+        displayOrder: contact.displayOrder,
+        // Enhanced availability data
+        isOnline,
+        currentAvailability,
+        // Pass the parsed availability schedule for frontend use
+        availabilitySchedule: availabilitySchedule ? {
+          available24_7: availabilitySchedule.available24_7,
+          workingHours: availabilitySchedule.workingHours,
+          preferredHours: availabilitySchedule.preferredHours
+        } : undefined
+      }
+    })
+
+    const responseData = {
       success: true,
       data: {
         contacts: publicContacts,
@@ -165,19 +177,30 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           name: tenant.name,
           subdomain: tenant.subdomain
         },
-        lastUpdated: new Date().toISOString()
+        lastUpdated: new Date().toISOString(),
+        // Add debug info
+        debug: {
+          totalContactsFound: allContacts.length,
+          globalContacts: tenant.whatsappContacts.length,
+          locationSpecificContacts: tenant.locations.reduce((acc, loc) => acc + loc.whatsappContacts.length, 0),
+          filteredByLocation: locationId ? 'yes' : 'no'
+        }
       }
-    })
+    }
 
-    // Cache for 5 minutes (contacts don't change frequently)
-    response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600')
+    const response = NextResponse.json(responseData)
+
+    // FIXED: More aggressive cache headers to prevent stale data
+    response.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate')
+    response.headers.set('Pragma', 'no-cache')
+    response.headers.set('Expires', '0')
     
     return response
 
   } catch (error) {
-    console.error('Error fetching WhatsApp contacts:', error)
+    console.error('❌ Error fetching WhatsApp contacts:', error)
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', details: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }
     )
   }
@@ -197,7 +220,7 @@ function parseAvailabilitySchedule(jsonValue: JsonValue): AvailabilitySchedule |
   }
 }
 
-// Helper function to determine if contact is currently online
+// Enhanced helper function to determine if contact is currently online
 function isContactOnline(availabilitySchedule: JsonValue): boolean {
   const schedule = parseAvailabilitySchedule(availabilitySchedule)
   
@@ -210,34 +233,41 @@ function isContactOnline(availabilitySchedule: JsonValue): boolean {
     return true
   }
 
-  // Check current time against working hours
+  // Check current time against working hours (Jakarta timezone)
   if (schedule.workingHours) {
-    const now = new Date()
-    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
-    const currentDay = dayNames[now.getDay()]
-    const currentTime = now.getHours() * 60 + now.getMinutes()
-    
-    const todayHours = schedule.workingHours[currentDay]
-    if (todayHours && todayHours.start && todayHours.end) {
-      const [startHour, startMinute] = todayHours.start.split(':').map(Number)
-      const [endHour, endMinute] = todayHours.end.split(':').map(Number)
+    try {
+      const now = new Date()
+      // Convert to Jakarta time
+      const jakartaTime = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Jakarta"}))
+      const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+      const currentDay = dayNames[jakartaTime.getDay()]
+      const currentTime = jakartaTime.getHours() * 60 + jakartaTime.getMinutes()
       
-      const startTime = startHour * 60 + startMinute
-      let endTime = endHour * 60 + endMinute
-      
-      // Handle overnight shifts
-      if (endTime < startTime) {
-        endTime += 24 * 60
+      const todayHours = schedule.workingHours[currentDay]
+      if (todayHours && todayHours.start && todayHours.end) {
+        const [startHour, startMinute] = todayHours.start.split(':').map(Number)
+        const [endHour, endMinute] = todayHours.end.split(':').map(Number)
+        
+        const startTime = startHour * 60 + startMinute
+        let endTime = endHour * 60 + endMinute
+        
+        // Handle overnight shifts (e.g., 22:00 - 02:00)
+        if (endTime < startTime) {
+          endTime += 24 * 60
+        }
+        
+        return currentTime >= startTime && currentTime <= endTime
       }
-      
-      return currentTime >= startTime && currentTime <= endTime
+    } catch (error) {
+      console.error('Error checking working hours:', error)
+      return false
     }
   }
 
   return false
 }
 
-// Helper function to get current availability status
+// Enhanced helper function to get current availability status
 function getCurrentAvailability(availabilitySchedule: JsonValue): string {
   const schedule = parseAvailabilitySchedule(availabilitySchedule)
   
@@ -254,15 +284,40 @@ function getCurrentAvailability(availabilitySchedule: JsonValue): string {
   }
 
   // Try to get next available time
-  const now = new Date()
-  const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
-  const currentDay = dayNames[now.getDay()]
-  
-  if (schedule.workingHours && schedule.workingHours[currentDay]) {
-    const todayHours = schedule.workingHours[currentDay]
-    if (todayHours.start) {
-      return `Available from ${todayHours.start}`
+  try {
+    const now = new Date()
+    const jakartaTime = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Jakarta"}))
+    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+    const currentDay = dayNames[jakartaTime.getDay()]
+    
+    if (schedule.workingHours && schedule.workingHours[currentDay]) {
+      const todayHours = schedule.workingHours[currentDay]
+      if (todayHours.start) {
+        const currentTime = jakartaTime.getHours() * 60 + jakartaTime.getMinutes()
+        const [startHour, startMinute] = todayHours.start.split(':').map(Number)
+        const startTime = startHour * 60 + startMinute
+        
+        if (currentTime < startTime) {
+          return `Available from ${todayHours.start} today`
+        }
+      }
     }
+
+    // Check next few days for availability
+    for (let i = 1; i <= 7; i++) {
+      const checkDayIndex = (jakartaTime.getDay() + i) % 7
+      const checkDay = dayNames[checkDayIndex]
+      
+      if (schedule.workingHours && schedule.workingHours[checkDay]) {
+        const nextHours = schedule.workingHours[checkDay]
+        if (nextHours.start) {
+          const dayName = i === 1 ? 'tomorrow' : checkDay
+          return `Next available: ${nextHours.start} ${dayName}`
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error getting next availability:', error)
   }
 
   return 'Contact for availability'

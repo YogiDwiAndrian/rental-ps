@@ -1,3 +1,4 @@
+// src/components/customer/responsive-wrapper.tsx - FINAL STABLE VERSION
 'use client'
 
 import { useMobileDetection } from '@/hooks/use-mobile-detection'
@@ -17,6 +18,7 @@ import { LocationSwitcher } from './location-switcher'
 import { MobileStats } from './mobile-stats'
 import { MobileUnits } from './mobile-units'
 import { MobileFnb } from './mobile-fnb'
+import { useEffect, useState } from 'react'
 
 interface ResponsiveWrapperProps {
   subdomain: string
@@ -28,6 +30,11 @@ interface WhatsAppContactFormatted {
   number: string
   isOnline: boolean
   responseTime?: string
+  availabilitySchedule?: {
+    available24_7?: boolean
+    workingHours?: Record<string, { start: string; end: string }>
+    preferredHours?: string
+  }
 }
 
 interface LocationInfo {
@@ -58,30 +65,29 @@ export function ResponsiveWrapper({ subdomain }: ResponsiveWrapperProps) {
     error: locationsError,
     switchLocation,
     clearSelection,
-    getLocationSpecificHooks
   } = useLocations(subdomain)
   
-  // SIMPLIFIED: Use selectedLocation.id directly instead of getLocationSpecificHooks()
+  // STABLE: Use selectedLocation.id consistently
   const currentLocationId = selectedLocation?.id
   
-  console.log("🔍 Current Location Debug:", {
-    selectedLocation: selectedLocation?.name,
-    currentLocationId,
-    hasMultipleLocations,
-    shouldShowSelector
-  })
-  
-  // Data hooks with direct location ID
+  // Data hooks with stable location ID
   const unitsData = useUnitsData(subdomain, currentLocationId)
   const fnbData = useFnbData(subdomain, currentLocationId)
-  const { contacts: dynamicContacts } = useWhatsAppContacts(subdomain, currentLocationId)
+  
+  // FIXED: Use stable contact loading with proper location filtering
+  const { 
+    contacts: dynamicContacts, 
+    loading: contactsLoading, 
+    error: contactsError 
+  } = useWhatsAppContacts(subdomain, currentLocationId)
+  
   
   // Get location data for the selected location
   const locationData: LocationInfo | null = selectedLocation ? {
     name: selectedLocation.name,
     address: selectedLocation.address,
     phone: selectedLocation.phone,
-    whatsapp: selectedLocation.phone, // Will be enhanced with dynamic contacts
+    whatsapp: selectedLocation.phone,
     operationalHours: selectedLocation.operationalHours,
     latitude: selectedLocation.latitude,
     longitude: selectedLocation.longitude
@@ -135,44 +141,42 @@ export function ResponsiveWrapper({ subdomain }: ResponsiveWrapperProps) {
     whatsapp: '+628'
   }
 
-  // Prepare WhatsApp contacts from dynamic data
-  const whatsappContacts: WhatsAppContactFormatted[] = dynamicContacts.length > 0 ? dynamicContacts.map(contact => ({
-    name: contact.name,
-    role: contact.role,
-    number: contact.whatsappNumber,
-    isOnline: contact.isOnline,
-    responseTime: contact.responseTime
-  })) : []
+  // STABLE: WhatsApp contacts preparation - use dynamic contacts directly
+  const whatsappContacts: WhatsAppContactFormatted[] = []
   
-  // Add fallback contacts if no dynamic contacts - BUT ONLY if really empty
-  if (whatsappContacts.length === 0) {
-    console.log('🚨 No dynamic contacts found, adding fallback contacts')
-    if (locationInfo.whatsapp) {
+  if (dynamicContacts.length > 0) {
+    console.log(`✅ Using ${dynamicContacts.length} dynamic contacts for location: ${selectedLocation?.name || 'default'}`)
+    
+    dynamicContacts.forEach(contact => {
       whatsappContacts.push({
-        name: 'Customer Service',
-        role: 'staff' as const,
-        number: locationInfo.whatsapp,
-        isOnline: true,
-        responseTime: '5 minutes'
+        name: contact.name,
+        role: contact.role,
+        number: contact.whatsappNumber,
+        isOnline: contact.isOnline,
+        responseTime: contact.responseTime,
+        availabilitySchedule: contact.availabilitySchedule
       })
-    }
-    if (locationInfo.phone && locationInfo.phone !== locationInfo.whatsapp) {
-      whatsappContacts.push({
-        name: 'Owner',
-        role: 'owner' as const,
-        number: locationInfo.phone,
-        isOnline: true,
-        responseTime: '10 minutes'
-      })
-    }
-  } else {
-    console.log(`✅ Found ${whatsappContacts.length} dynamic contacts:`, whatsappContacts.map(c => c.name))
+    })
+  } else if (!contactsLoading) {
+    // Only show fallback if not loading and no contacts found
+    console.log('⚠️ No dynamic contacts found, using minimal fallback')
+    
+    whatsappContacts.push({
+      name: 'Customer Service',
+      role: 'staff',
+      number: locationInfo.whatsapp || '+628123456789',
+      isOnline: true,
+      responseTime: '5 minutes'
+    })
   }
 
   const lastUpdatedData: LastUpdatedData = {
     units: unitsData.lastUpdated,
     fnb: fnbData.lastUpdated
   }
+
+  // STABLE: Only render WhatsApp button when we have contacts and not loading
+  const shouldShowWhatsApp = whatsappContacts.length > 0 && !contactsLoading
 
   if (isMobile) {
     return (
@@ -192,7 +196,7 @@ export function ResponsiveWrapper({ subdomain }: ResponsiveWrapperProps) {
           locationInfo={locationInfo}
           lastUpdated={lastUpdatedData}
         />
-        {whatsappContacts.length > 0 && (
+        {shouldShowWhatsApp && (
           <FloatingWhatsApp 
             contacts={whatsappContacts}
             locationName={locationInfo.name}
@@ -220,7 +224,7 @@ export function ResponsiveWrapper({ subdomain }: ResponsiveWrapperProps) {
           locationInfo={locationInfo}
           lastUpdated={lastUpdatedData}
         />
-        {whatsappContacts.length > 0 && (
+        {shouldShowWhatsApp && (
           <FloatingWhatsApp 
             contacts={whatsappContacts}
             locationName={locationInfo.name}
@@ -248,7 +252,7 @@ export function ResponsiveWrapper({ subdomain }: ResponsiveWrapperProps) {
         locationInfo={locationInfo}
         lastUpdated={lastUpdatedData}
       />
-      {whatsappContacts.length > 0 && (
+      {shouldShowWhatsApp && (
         <FloatingWhatsApp 
           contacts={whatsappContacts}
           locationName={locationInfo.name}
@@ -258,7 +262,7 @@ export function ResponsiveWrapper({ subdomain }: ResponsiveWrapperProps) {
   )
 }
 
-// Enhanced Mobile Layout with proper types
+// Layout components remain the same...
 interface LayoutProps {
   subdomain: string
   locationInfo: LocationInfo
@@ -284,13 +288,11 @@ function MobileLayout({
 }: LayoutProps) {
   return (
     <div className="container mx-auto p-4 space-y-6 max-w-md">
-      {/* Mobile Header with Location Switcher */}
       <div className="text-center mb-6">
         <h1 className="text-2xl font-bold text-gray-900 mb-4">
           🎮 Gaming Center
         </h1>
         
-        {/* Location Switcher for Mobile */}
         {hasMultipleLocations && selectedLocation && (
           <div className="mb-4">
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
@@ -314,13 +316,11 @@ function MobileLayout({
         </p>
       </div>
 
-      {/* Quick Stats */}
       <MobileStats 
         unitsStats={unitsData.stats}
         fnbStats={fnbData.stats}
       />
 
-      {/* PRIORITY ORDER: Units First, then F&B */}
       <MobileUnits
         groupedUnits={unitsData.groupedUnits}
         loading={unitsData.loading}
@@ -335,7 +335,6 @@ function MobileLayout({
         onRefresh={fnbData.refresh}
       />
 
-      {/* Mobile Contact Footer - Simplified */}
       <div className="text-center py-4 border-t border-gray-200">
         <p className="text-xs text-gray-500 mb-2">
           Data refreshes automatically every 30 seconds
@@ -349,7 +348,6 @@ function MobileLayout({
   )
 }
 
-// Enhanced Desktop Layout with proper types
 function DesktopLayout({ 
   subdomain, 
   locationInfo,
@@ -364,10 +362,6 @@ function DesktopLayout({
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50">
       <div className="container mx-auto p-6 space-y-8 max-w-7xl">
-        
-        {/* Location Switcher for Desktop - Remove since it's now in UnitsCard */}
-
-        {/* PRIORITY ORDER: Units First (most important) */}
         <UnitsCard
           units={unitsData.units}
           loading={unitsData.loading}
@@ -381,7 +375,6 @@ function DesktopLayout({
           onShowSelector={onShowSelector}
         />
         
-        {/* F&B Second (also important for revenue) */}
         <FnbCard
           categories={fnbData.categories}
           loading={fnbData.loading}
