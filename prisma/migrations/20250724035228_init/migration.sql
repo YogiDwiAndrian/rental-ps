@@ -16,6 +16,9 @@ CREATE TYPE "PaymentStatus" AS ENUM ('pending', 'paid', 'failed', 'refunded');
 -- CreateEnum
 CREATE TYPE "TransactionType" AS ENUM ('rental', 'fnb', 'extension', 'refund');
 
+-- CreateEnum
+CREATE TYPE "ContactRole" AS ENUM ('owner', 'manager', 'staff', 'custom');
+
 -- CreateTable
 CREATE TABLE "accounts" (
     "id" TEXT NOT NULL,
@@ -106,6 +109,10 @@ CREATE TABLE "locations" (
     "settings" JSONB NOT NULL DEFAULT '{}',
     "show_on_customer_page" BOOLEAN NOT NULL DEFAULT true,
     "is_active" BOOLEAN NOT NULL DEFAULT true,
+    "latitude" DECIMAL(10,8),
+    "longitude" DECIMAL(11,8),
+    "maps_place_id" TEXT,
+    "timezone" TEXT NOT NULL DEFAULT 'Asia/Jakarta',
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
@@ -143,6 +150,27 @@ CREATE TABLE "units" (
     "updated_at" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "units_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "whatsapp_contacts" (
+    "id" TEXT NOT NULL,
+    "tenant_id" TEXT NOT NULL,
+    "location_id" TEXT,
+    "user_id" TEXT,
+    "name" TEXT NOT NULL,
+    "whatsapp_number" TEXT NOT NULL,
+    "role" "ContactRole" NOT NULL,
+    "is_primary" BOOLEAN NOT NULL DEFAULT false,
+    "is_active" BOOLEAN NOT NULL DEFAULT true,
+    "response_time" TEXT,
+    "availability_schedule" JSONB NOT NULL DEFAULT '{}',
+    "display_order" INTEGER NOT NULL DEFAULT 0,
+    "notes" TEXT,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "whatsapp_contacts_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -301,6 +329,9 @@ CREATE TABLE "customer_page_config" (
     "public_email" TEXT,
     "public_address" TEXT,
     "whatsapp_number" TEXT,
+    "show_maps" BOOLEAN NOT NULL DEFAULT true,
+    "show_operational_hours" BOOLEAN NOT NULL DEFAULT true,
+    "google_maps_api_key" TEXT,
     "is_active" BOOLEAN NOT NULL DEFAULT true,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
@@ -361,6 +392,12 @@ CREATE UNIQUE INDEX "user_location_assignments_user_id_location_id_key" ON "user
 CREATE UNIQUE INDEX "units_location_id_name_key" ON "units"("location_id", "name");
 
 -- CreateIndex
+CREATE INDEX "whatsapp_contacts_tenant_id_location_id_idx" ON "whatsapp_contacts"("tenant_id", "location_id");
+
+-- CreateIndex
+CREATE INDEX "whatsapp_contacts_is_active_display_order_idx" ON "whatsapp_contacts"("is_active", "display_order");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "fnb_items_location_id_name_key" ON "fnb_items"("location_id", "name");
 
 -- CreateIndex
@@ -386,6 +423,15 @@ ALTER TABLE "user_location_assignments" ADD CONSTRAINT "user_location_assignment
 
 -- AddForeignKey
 ALTER TABLE "units" ADD CONSTRAINT "units_location_id_fkey" FOREIGN KEY ("location_id") REFERENCES "locations"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "whatsapp_contacts" ADD CONSTRAINT "whatsapp_contacts_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "whatsapp_contacts" ADD CONSTRAINT "whatsapp_contacts_location_id_fkey" FOREIGN KEY ("location_id") REFERENCES "locations"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "whatsapp_contacts" ADD CONSTRAINT "whatsapp_contacts_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "rental_sessions" ADD CONSTRAINT "rental_sessions_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;

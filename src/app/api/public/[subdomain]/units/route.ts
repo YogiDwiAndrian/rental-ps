@@ -1,4 +1,3 @@
-// src/app/api/public/[subdomain]/units/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 
@@ -67,7 +66,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       )
     }
 
-    // Calculate remaining time for occupied units
+    // Calculate remaining time and include all unit data
     const unitsWithStatus = tenant.locations.flatMap(location => 
       location.units.map(unit => {
         let remainingMinutes: number | null = null
@@ -98,7 +97,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           hourlyRate: Number(unit.hourlyRate),
           remainingMinutes,
           estimatedEndTime,
-          locationName: location.name
+          customerDisplayName: unit.customerDisplayName,
+          locationName: location.name,
+          // Include specifications and package rates
+          specifications: unit.specifications || {},
+          packageRates: unit.packageRates || {}
         }
       })
     )
