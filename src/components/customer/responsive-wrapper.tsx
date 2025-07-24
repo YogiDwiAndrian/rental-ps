@@ -1,4 +1,4 @@
-// src/components/customer/responsive-wrapper.tsx - FINAL STABLE VERSION
+// src/components/customer/responsive-wrapper.tsx - UPDATED FOR MOBILE
 'use client'
 
 import { useMobileDetection } from '@/hooks/use-mobile-detection'
@@ -11,6 +11,7 @@ import { UnitsCard } from './units-card'
 import { FnbCard } from './fnb-card'
 import { FloatingWhatsApp } from './floating-whatsapp'
 import { Footer } from './footer'
+import { MobileFooter } from './mobile-footer' // NEW: Import mobile footer
 import { LocationSelector } from './location-selector'
 import { LocationSwitcher } from './location-switcher'
 
@@ -18,7 +19,6 @@ import { LocationSwitcher } from './location-switcher'
 import { MobileStats } from './mobile-stats'
 import { MobileUnits } from './mobile-units'
 import { MobileFnb } from './mobile-fnb'
-import { useEffect, useState } from 'react'
 
 interface ResponsiveWrapperProps {
   subdomain: string
@@ -192,7 +192,8 @@ export function ResponsiveWrapper({ subdomain }: ResponsiveWrapperProps) {
           onSwitchLocation={switchLocation}
           onShowSelector={clearSelection}
         />
-        <Footer 
+        {/* UPDATED: Use MobileFooter for mobile */}
+        <MobileFooter 
           locationInfo={locationInfo}
           lastUpdated={lastUpdatedData}
         />
@@ -220,6 +221,7 @@ export function ResponsiveWrapper({ subdomain }: ResponsiveWrapperProps) {
           onSwitchLocation={switchLocation}
           onShowSelector={clearSelection}
         />
+        {/* Keep using regular Footer for desktop */}
         <Footer 
           locationInfo={locationInfo}
           lastUpdated={lastUpdatedData}

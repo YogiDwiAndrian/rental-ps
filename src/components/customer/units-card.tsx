@@ -15,7 +15,6 @@ import {
   Timer,
   MapPin,
   RefreshCw,
-  ChevronDown,
   Building2
 } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
@@ -57,6 +56,25 @@ export function UnitsCard({
   onShowSelector
 }: UnitsCardProps) {
   
+  // Helper functions to check if data exists
+  const hasPackageRates = (unit: Unit) => {
+    return unit.specifications?.packageRates && 
+           typeof unit.specifications.packageRates === 'object' && 
+           Object.keys(unit.specifications.packageRates).length > 0
+  }
+
+  const hasGames = (unit: Unit) => {
+    return unit.specifications?.games && 
+           Array.isArray(unit.specifications.games) && 
+           unit.specifications.games.length > 0
+  }
+
+  const hasSpecs = (unit: Unit) => {
+    return unit.specifications?.storage || 
+           unit.specifications?.resolution || 
+           (unit.specifications?.features && Array.isArray(unit.specifications.features) && unit.specifications.features.length > 0)
+  }
+
   const getStatusConfig = (status: string, remainingMinutes?: number) => {
     switch (status) {
       case 'available':
@@ -166,15 +184,15 @@ export function UnitsCard({
                   </span>
                 </div>
                 
-                {/* Package Pricing */}
-                {unit.specifications?.packageRates && Object.keys(unit.specifications.packageRates).length > 0 && (
+                {/* Package Pricing - Only show if exists */}
+                {hasPackageRates(unit) && (
                   <div className="space-y-2">
                     <div className="flex items-center gap-1 mb-2">
                       <Package className="w-4 h-4 text-blue-500" />
                       <span className="text-sm font-medium text-blue-700">Package Deals</span>
                     </div>
                     <div className="bg-blue-50 rounded-md p-3 space-y-1">
-                      {Object.entries(unit.specifications.packageRates as Record<string, number>).map(([duration, price]) => (
+                      {Object.entries(unit.specifications!.packageRates as Record<string, number>).map(([duration, price]) => (
                         <div key={duration} className="flex justify-between text-sm">
                           <span className="text-blue-700 font-medium">{duration.replace('hours', 'h')}</span>
                           <span className="font-bold text-blue-800">{formatCurrency(price)}</span>
@@ -199,14 +217,47 @@ export function UnitsCard({
               </div>
             )}
 
-            {/* Available Games with Enhanced Tooltip */}
-            {unit.specifications?.games && Array.isArray(unit.specifications.games) && unit.specifications.games.length > 0 && (
+            {/* Available Games with Enhanced Tooltip - Only show if exists */}
+            {hasGames(unit) && (
               <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg p-3 border border-purple-200">
                 <p className="text-sm font-medium text-purple-700 mb-2 flex items-center gap-1">
                   <Gamepad2 className="w-4 h-4" />
-                  Available Games
+                  Available Games ({unit.specifications!.games!.length})
                 </p>
-                <GamesTooltip games={unit.specifications.games} maxVisible={3} />
+                <GamesTooltip games={unit.specifications!.games!} maxVisible={3} />
+              </div>
+            )}
+
+            {/* Specifications - Only show if exists */}
+            {hasSpecs(unit) && (
+              <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                <p className="text-sm font-medium text-gray-700 mb-2">⚙️ Specifications</p>
+                <div className="space-y-1 text-xs">
+                  {unit.specifications?.storage && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Storage:</span>
+                      <span className="font-medium text-gray-900">{unit.specifications.storage}</span>
+                    </div>
+                  )}
+                  {unit.specifications?.resolution && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Resolution:</span>
+                      <span className="font-medium text-gray-900">{unit.specifications.resolution}</span>
+                    </div>
+                  )}
+                  {unit.specifications?.features && Array.isArray(unit.specifications.features) && unit.specifications.features.length > 0 && (
+                    <div className="mt-2">
+                      <span className="text-gray-600 text-xs block mb-1">Features:</span>
+                      <div className="flex flex-wrap gap-1">
+                        {unit.specifications.features.map((feature, index) => (
+                          <Badge key={index} variant="secondary" className="text-xs">
+                            {feature}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

@@ -13,13 +13,13 @@ import {
   Phone, 
   Crown,
   Headphones,
-  Shield,
   UserCog,
   Coffee,
   CheckCircle2,
   AlertCircle
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useMobileDetection } from '@/hooks/use-mobile-detection'
 
 interface WhatsAppContact {
   name: string
@@ -28,7 +28,6 @@ interface WhatsAppContact {
   isOnline?: boolean
   responseTime?: string
   currentAvailability?: string
-  // Enhanced availability from API
   availabilitySchedule?: {
     available24_7?: boolean
     workingHours?: Record<string, { start: string; end: string }>
@@ -48,9 +47,8 @@ function checkAvailabilityStatus(contact: WhatsAppContact): {
   status: 'available' | 'busy' | 'offline' | 'owner_available'
   message: string
   nextAvailable?: string
-  priority: number // Lower = higher priority
+  priority: number
 } {
-  // Owner is always available (priority 1)
   if (contact.role === 'owner') {
     return {
       isAvailable: true,
@@ -60,7 +58,6 @@ function checkAvailabilityStatus(contact: WhatsAppContact): {
     }
   }
 
-  // Check if contact has 24/7 availability
   if (contact.availabilitySchedule?.available24_7) {
     return {
       isAvailable: true,
@@ -70,7 +67,6 @@ function checkAvailabilityStatus(contact: WhatsAppContact): {
     }
   }
 
-  // Check working hours
   if (contact.availabilitySchedule?.workingHours) {
     const now = new Date()
     const jakartaTime = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Jakarta"}))
@@ -87,7 +83,6 @@ function checkAvailabilityStatus(contact: WhatsAppContact): {
       const startTime = startHour * 60 + startMinute
       let endTime = endHour * 60 + endMinute
       
-      // Handle overnight shifts (e.g., 22:00 - 02:00)
       if (endTime < startTime) {
         endTime += 24 * 60
       }
@@ -102,7 +97,6 @@ function checkAvailabilityStatus(contact: WhatsAppContact): {
           priority: contact.role === 'manager' ? 3 : 4
         }
       } else {   
-        // Check if opening later today
         if (currentTime < startTime) {
           return {
             isAvailable: false,
@@ -113,7 +107,6 @@ function checkAvailabilityStatus(contact: WhatsAppContact): {
           }
         }
         
-        // Find next working day
         for (let i = 1; i <= 7; i++) {
           const dayIndex = (jakartaTime.getDay() + i) % 7
           const checkDay = dayNames[dayIndex]
@@ -134,7 +127,6 @@ function checkAvailabilityStatus(contact: WhatsAppContact): {
     }
   }
 
-  // Fallback to API provided status
   if (contact.isOnline) {
     return {
       isAvailable: true,
@@ -152,7 +144,6 @@ function checkAvailabilityStatus(contact: WhatsAppContact): {
   }
 }
 
-// Enhanced role info with better descriptions
 function getRoleInfo(role: string) {
   switch (role) {
     case 'owner':
@@ -193,8 +184,8 @@ function getRoleInfo(role: string) {
 export function FloatingWhatsApp({ contacts, locationName }: FloatingWhatsAppProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [isVisible, setIsVisible] = useState(true)
+  const { isMobile } = useMobileDetection()
 
-  // Show after a delay to ensure page is loaded
   useEffect(() => {
     const timer = setTimeout(() => {
       setIsVisible(true)
@@ -202,7 +193,6 @@ export function FloatingWhatsApp({ contacts, locationName }: FloatingWhatsAppPro
     return () => clearTimeout(timer)
   }, [])
 
-  // Auto close when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Element
@@ -219,11 +209,9 @@ export function FloatingWhatsApp({ contacts, locationName }: FloatingWhatsAppPro
 
   const handleContactWhatsApp = (contact: WhatsAppContact) => {
     const availabilityStatus = checkAvailabilityStatus(contact)
-    const roleInfo = getRoleInfo(contact.role)
     
     let message = `Hi ${contact.name}! 👋\n\nSaya tertarik untuk bermain di ${locationName}.\n\n`
     
-    // Customize message based on role and availability
     if (contact.role === 'owner') {
       message += `Apakah ada unit PlayStation yang tersedia sekarang?\n\n`
       if (!availabilityStatus.isAvailable) {
@@ -252,53 +240,63 @@ export function FloatingWhatsApp({ contacts, locationName }: FloatingWhatsAppPro
       roleInfo: getRoleInfo(contact.role)
     }))
     .sort((a, b) => {
-      // First sort by availability (available first)
       if (a.availability.isAvailable && !b.availability.isAvailable) return -1
       if (!a.availability.isAvailable && b.availability.isAvailable) return 1
-      
-      // Then by priority (lower number = higher priority)
       return a.availability.priority - b.availability.priority
     })
 
-  // Group contacts for better UI organization
   const availableContacts = sortedContacts.filter(({ availability }) => availability.isAvailable)
   const offlineContacts = sortedContacts.filter(({ availability }) => !availability.isAvailable)
   
-  // Further group available contacts by role
   const availableOwners = availableContacts.filter(({ contact }) => contact.role === 'owner')
   const availableManagers = availableContacts.filter(({ contact }) => contact.role === 'manager')
   const availableStaff = availableContacts.filter(({ contact }) => ['staff', 'custom'].includes(contact.role))
 
   const availableCount = availableContacts.length
-  const totalCount = contacts.length
 
   return (
     <div 
-      className="fixed bottom-6 right-6 z-50" 
+      className="fixed bottom-4 right-4 z-50" 
       data-floating-whatsapp
       style={{ zIndex: 9999 }}
     >
-      {/* Enhanced Contact List with Better Organization */}
+      {/* MOBILE-RESPONSIVE Contact List */}
       {isOpen && (
-        <div className="mb-4 w-96 animate-in slide-in-from-bottom-2 duration-300">
-          <Card className="shadow-2xl border-2 border-green-200 bg-white max-h-[85vh] overflow-hidden">
+        <div className={cn(
+          "mb-4 animate-in slide-in-from-bottom-2 duration-300",
+          isMobile 
+            ? "fixed inset-x-4 bottom-20 max-h-[70vh]" // Mobile: Full width with margins
+            : "w-96 max-h-[85vh]" // Desktop: Fixed width
+        )}>
+          <Card className="shadow-2xl border-2 border-green-200 bg-white overflow-hidden">
             
-            {/* Enhanced Header */}
-            <CardHeader className="bg-gradient-to-r from-green-500 to-emerald-500 text-white pb-4">
+            {/* Enhanced Header - Mobile Optimized */}
+            <CardHeader className={cn(
+              "bg-gradient-to-r from-green-500 to-emerald-500 text-white",
+              isMobile ? "pb-3 px-4 py-3" : "pb-4"
+            )}>
               <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-white text-xl font-bold flex items-center gap-2">
-                    <MessageCircle className="w-6 h-6" />
-                    Contact {locationName}
+                <div className="flex-1 min-w-0"> {/* min-w-0 for text truncation */}
+                  <CardTitle className={cn(
+                    "text-white font-bold flex items-center gap-2",
+                    isMobile ? "text-lg" : "text-xl"
+                  )}>
+                    <MessageCircle className={cn(isMobile ? "w-5 h-5" : "w-6 h-6")} />
+                    <span className="truncate">Contact {locationName}</span>
                   </CardTitle>
-                  <p className="text-green-100 text-sm mt-1">Choose the right person for your needs</p>
+                  <p className={cn(
+                    "text-green-100 mt-1",
+                    isMobile ? "text-xs" : "text-sm"
+                  )}>
+                    Choose the right person for your needs
+                  </p>
                   <div className="flex items-center gap-2 mt-2">
-                    <Badge className="bg-white/20 text-white border-white/30">
+                    <Badge className="bg-white/20 text-white border-white/30 text-xs">
                       <CheckCircle2 className="w-3 h-3 mr-1" />
                       {availableCount} available
                     </Badge>
                     {offlineContacts.length > 0 && (
-                      <Badge className="bg-red-400/20 text-white border-red-300/30">
+                      <Badge className="bg-red-400/20 text-white border-red-300/30 text-xs">
                         <AlertCircle className="w-3 h-3 mr-1" />
                         {offlineContacts.length} offline
                       </Badge>
@@ -309,14 +307,17 @@ export function FloatingWhatsApp({ contacts, locationName }: FloatingWhatsAppPro
                   variant="ghost"
                   size="sm"
                   onClick={() => setIsOpen(false)}
-                  className="text-white hover:bg-white/20 h-8 w-8 p-0"
+                  className="text-white hover:bg-white/20 h-8 w-8 p-0 flex-shrink-0"
                 >
                   <X className="w-4 h-4" />
                 </Button>
               </div>
             </CardHeader>
             
-            <CardContent className="p-0 max-h-96 overflow-y-auto">
+            <CardContent className={cn(
+              "p-0 overflow-y-auto",
+              isMobile ? "max-h-[50vh]" : "max-h-96"
+            )}>
               <div className="space-y-0">
                 
                 {/* Quick Response Section - Available Staff First */}
@@ -341,6 +342,7 @@ export function FloatingWhatsApp({ contacts, locationName }: FloatingWhatsAppPro
                         roleInfo={roleInfo}
                         onContact={handleContactWhatsApp}
                         isHighPriority={true}
+                        isMobile={isMobile}
                       />
                     ))}
                   </div>
@@ -365,12 +367,13 @@ export function FloatingWhatsApp({ contacts, locationName }: FloatingWhatsAppPro
                         availability={availability}
                         roleInfo={roleInfo}
                         onContact={handleContactWhatsApp}
+                        isMobile={isMobile}
                       />
                     ))}
                   </div>
                 )}
 
-                {/* Owner Section - Special Treatment */}
+                {/* Owner Section */}
                 {availableOwners.length > 0 && (
                   <div>
                     {(availableStaff.length > 0 || availableManagers.length > 0) && <Separator />}
@@ -393,6 +396,7 @@ export function FloatingWhatsApp({ contacts, locationName }: FloatingWhatsAppPro
                         roleInfo={roleInfo}
                         onContact={handleContactWhatsApp}
                         isOwner={true}
+                        isMobile={isMobile}
                       />
                     ))}
                   </div>
@@ -418,32 +422,36 @@ export function FloatingWhatsApp({ contacts, locationName }: FloatingWhatsAppPro
                         roleInfo={roleInfo}
                         onContact={handleContactWhatsApp}
                         isOffline={true}
+                        isMobile={isMobile}
                       />
                     ))}
                   </div>
                 )}
               </div>
               
-              {/* Enhanced Footer with Usage Tips */}
+              {/* Enhanced Footer with Usage Tips - Mobile Optimized */}
               <div className="p-4 bg-gradient-to-r from-green-50 to-blue-50 border-t">
-                <div className="text-xs text-gray-600 space-y-2">
+                <div className={cn(
+                  "text-gray-600 space-y-2",
+                  isMobile ? "text-xs" : "text-xs"
+                )}>
                   <div className="font-semibold mb-2 text-center">💡 Who to Contact:</div>
                   <div className="grid grid-cols-1 gap-1">
                     <div className="flex items-center gap-2">
-                      <Headphones className="w-3 h-3 text-green-600" />
-                      <span><strong>Staff:</strong> Unit availability, games, quick help</span>
+                      <Headphones className="w-3 h-3 text-green-600 flex-shrink-0" />
+                      <span className="text-xs"><strong>Staff:</strong> Unit availability, games, quick help</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <UserCog className="w-3 h-3 text-blue-600" />
-                      <span><strong>Manager:</strong> Bookings, pricing, facilities</span>
+                      <UserCog className="w-3 h-3 text-blue-600 flex-shrink-0" />
+                      <span className="text-xs"><strong>Manager:</strong> Bookings, pricing, facilities</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Crown className="w-3 h-3 text-yellow-600" />
-                      <span><strong>Owner:</strong> Complaints, important matters</span>
+                      <Crown className="w-3 h-3 text-yellow-600 flex-shrink-0" />
+                      <span className="text-xs"><strong>Owner:</strong> Complaints, important matters</span>
                     </div>
                   </div>
                   <div className="text-center pt-2 border-t border-gray-200">
-                    <span className="text-green-600 font-medium">✨ All messages are in Bahasa Indonesia</span>
+                    <span className="text-green-600 font-medium text-xs">✨ All messages are in Bahasa Indonesia</span>
                   </div>
                 </div>
               </div>
@@ -452,39 +460,23 @@ export function FloatingWhatsApp({ contacts, locationName }: FloatingWhatsAppPro
         </div>
       )}
 
-      {/* Enhanced Floating Button */}
+      {/* Simplified Floating Button */}
       <Button
         onClick={() => setIsOpen(!isOpen)}
         className={cn(
-          "h-16 w-16 rounded-full bg-green-500 hover:bg-green-600 shadow-2xl transition-all duration-300 relative group",
-          isOpen && "bg-green-600 scale-105"
+          "rounded-full bg-green-500 hover:bg-green-600 shadow-2xl transition-all duration-300 relative group",
+          isOpen && "bg-green-600 scale-105",
+          isMobile ? "h-14 w-14" : "h-16 w-16" // Slightly smaller on mobile
         )}
         style={{ 
           filter: 'drop-shadow(0 8px 16px rgba(34, 197, 94, 0.3))',
         }}
       >
         <div className="relative">
-          <MessageCircle className="w-7 h-7 text-white" />
-          
-          {/* Enhanced Availability Badge */}
-          {availableCount > 0 && (
-            <Badge className="absolute -top-4 -right-4 h-8 w-8 p-0 bg-red-500 text-white text-xs flex items-center justify-center border-2 border-white rounded-full">
-              <div className="text-center">
-                <div className="text-xs font-bold">{availableCount}</div>
-                <div className="text-[8px] leading-none">online</div>
-              </div>
-            </Badge>
-          )}
-          
-          {/* Offline contacts indicator */}
-          {offlineContacts.length > 0 && (
-            <Badge className="absolute -bottom-3 -left-3 h-5 w-5 p-0 bg-gray-500 text-white text-xs flex items-center justify-center border-2 border-white rounded-full">
-              {offlineContacts.length}
-            </Badge>
-          )}
+          <MessageCircle className={cn(isMobile ? "w-6 h-6" : "w-7 h-7", "text-white")} />
         </div>
         
-        {/* Pulse animations - only when not open and contacts available */}
+        {/* Pulse animations */}
         {!isOpen && availableCount > 0 && (
           <>
             <div className="absolute inset-0 rounded-full bg-green-400 animate-ping opacity-75"></div>
@@ -493,9 +485,14 @@ export function FloatingWhatsApp({ contacts, locationName }: FloatingWhatsAppPro
         )}
       </Button>
 
-      {/* Enhanced Tooltip */}
+      {/* Enhanced Tooltip - Mobile Optimized */}
       {!isOpen && (
-        <div className="absolute bottom-20 right-0 bg-black/90 text-white text-xs px-3 py-2 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap">
+        <div className={cn(
+          "absolute bg-black/90 text-white text-xs px-3 py-2 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap",
+          isMobile 
+            ? "bottom-16 right-0 max-w-[200px] whitespace-normal" // Mobile: above button, allow wrap
+            : "bottom-20 right-0" // Desktop: above button
+        )}>
           💬 Chat with {locationName}
           <div className="text-center mt-1">
             {availableCount > 0 && (
@@ -507,14 +504,17 @@ export function FloatingWhatsApp({ contacts, locationName }: FloatingWhatsAppPro
               </span>
             )}
           </div>
-          <div className="absolute top-full right-4 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-black/90"></div>
+          <div className={cn(
+            "absolute w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-black/90",
+            isMobile ? "top-full right-4" : "top-full right-4"
+          )}></div>
         </div>
       )}
     </div>
   )
 }
 
-// Enhanced Contact Item Component
+// Enhanced Contact Item Component - Mobile Optimized
 interface ContactItemProps {
   contact: WhatsAppContact
   availability: ReturnType<typeof checkAvailabilityStatus>
@@ -523,6 +523,7 @@ interface ContactItemProps {
   isHighPriority?: boolean
   isOwner?: boolean
   isOffline?: boolean
+  isMobile?: boolean
 }
 
 function ContactItem({ 
@@ -532,9 +533,11 @@ function ContactItem({
   onContact, 
   isHighPriority = false,
   isOwner = false,
-  isOffline = false
+  isOffline = false,
+  isMobile = false
 }: ContactItemProps) {
-  const baseClasses = "w-full p-4 text-left transition-all duration-200 group border-b border-gray-100"
+  const baseClasses = "w-full text-left transition-all duration-200 group border-b border-gray-100"
+  const padding = isMobile ? "p-3" : "p-4"
   const hoverClasses = isOwner 
     ? "hover:bg-gradient-to-r hover:from-yellow-50 hover:to-orange-50" 
     : isHighPriority 
@@ -546,12 +549,14 @@ function ContactItem({
   return (
     <button
       onClick={() => onContact(contact)}
-      className={`${baseClasses} ${hoverClasses} ${isOffline ? 'opacity-75' : ''}`}
+      className={`${baseClasses} ${padding} ${hoverClasses} ${isOffline ? 'opacity-75' : ''}`}
     >
       <div className="flex items-center gap-3">
-        {/* Enhanced Avatar */}
-        <div className="relative">
-          <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
+        {/* Enhanced Avatar - Mobile Optimized */}
+        <div className="relative flex-shrink-0">
+          <div className={cn(
+            "rounded-full flex items-center justify-center",
+            isMobile ? "w-10 h-10" : "w-12 h-12",
             isOwner 
               ? 'bg-gradient-to-br from-yellow-100 to-orange-100 border-2 border-yellow-200'
               : isHighPriority 
@@ -559,37 +564,49 @@ function ContactItem({
                 : isOffline 
                   ? 'bg-gray-100' 
                   : 'bg-blue-100'
-          }`}>
+          )}>
             {roleInfo.icon}
           </div>
           
           {/* Status Indicator */}
-          <div className={`absolute -bottom-1 -right-1 w-4 h-4 border-2 border-white rounded-full flex items-center justify-center ${
+          <div className={cn(
+            "absolute -bottom-1 -right-1 border-2 border-white rounded-full flex items-center justify-center",
+            isMobile ? "w-3 h-3" : "w-4 h-4",
             availability.isAvailable
               ? isOwner 
                 ? 'bg-yellow-500' 
                 : 'bg-green-500 animate-pulse'
               : 'bg-gray-400'
-          }`}>
-            {isOwner && <Crown className="w-2 h-2 text-white" />}
+          )}>
+            {isOwner && <Crown className={cn(isMobile ? "w-1.5 h-1.5" : "w-2 h-2", "text-white")} />}
           </div>
         </div>
         
-        {/* Contact Info */}
-        <div className="flex-1">
+        {/* Contact Info - Mobile Optimized */}
+        <div className="flex-1 min-w-0"> {/* min-w-0 for text truncation */}
           <div className="flex items-center gap-2 mb-1">
-            <span className={`font-semibold ${isOffline ? 'text-gray-700' : 'text-gray-900'}`}>
+            <span className={cn(
+              "font-semibold truncate",
+              isMobile ? "text-sm" : "text-base",
+              isOffline ? 'text-gray-700' : 'text-gray-900'
+            )}>
               {contact.name}
             </span>
-            <Badge className={roleInfo.color}>
+            <Badge className={cn(roleInfo.color, "text-xs flex-shrink-0")}>
               {roleInfo.icon}
               <span className="ml-1">{roleInfo.label}</span>
             </Badge>
           </div>
           
           <div className="flex items-center gap-2 mb-1">
-            <Phone className={`w-3 h-3 ${isOffline ? 'text-gray-400' : 'text-gray-500'}`} />
-            <span className={`text-xs ${isOffline ? 'text-gray-500' : 'text-gray-600'}`}>
+            <Phone className={cn(
+              isMobile ? "w-3 h-3" : "w-3 h-3",
+              isOffline ? 'text-gray-400' : 'text-gray-500'
+            )} />
+            <span className={cn(
+              "text-xs truncate",
+              isOffline ? 'text-gray-500' : 'text-gray-600'
+            )}>
               {contact.number}
             </span>
           </div>
@@ -597,34 +614,39 @@ function ContactItem({
           {/* Availability Status */}
           <div className="flex items-center gap-1">
             {availability.status === 'available' && (
-              <CheckCircle2 className="w-3 h-3 text-green-600" />
+              <CheckCircle2 className="w-3 h-3 text-green-600 flex-shrink-0" />
             )}
             {availability.status === 'owner_available' && (
-              <Crown className="w-3 h-3 text-yellow-600" />
+              <Crown className="w-3 h-3 text-yellow-600 flex-shrink-0" />
             )}
             {availability.status === 'offline' && (
-              <Clock className="w-3 h-3 text-gray-500" />
+              <Clock className="w-3 h-3 text-gray-500 flex-shrink-0" />
             )}
             
-            <p className={`text-xs ${
+            <p className={cn(
+              "text-xs truncate",
               availability.isAvailable 
                 ? isOwner 
                   ? 'text-yellow-600 font-medium' 
                   : 'text-green-600 font-medium'
                 : 'text-gray-500'
-            }`}>
+            )}>
               {availability.message}
             </p>
           </div>
           
-          {/* Role Description */}
-          <p className="text-xs text-gray-500 mt-1 italic">
-            {roleInfo.description}
-          </p>
+          {/* Role Description - Hidden on mobile to save space */}
+          {!isMobile && (
+            <p className="text-xs text-gray-500 mt-1 italic truncate">
+              {roleInfo.description}
+            </p>
+          )}
         </div>
         
         {/* Action Icon */}
-        <MessageCircle className={`w-6 h-6 transition-colors ${
+        <MessageCircle className={cn(
+          isMobile ? "w-5 h-5" : "w-6 h-6",
+          "transition-colors flex-shrink-0",
           isOwner 
             ? 'text-yellow-600 group-hover:text-yellow-700'
             : isHighPriority 
@@ -632,7 +654,7 @@ function ContactItem({
               : isOffline 
                 ? 'text-gray-500 group-hover:text-gray-600'
                 : 'text-blue-600 group-hover:text-blue-700'
-        }`} />
+        )} />
       </div>
     </button>
   )

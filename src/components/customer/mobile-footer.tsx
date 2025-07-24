@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
 import { 
   MapPin, 
   Clock, 
@@ -21,7 +22,7 @@ interface LocationInfo {
   longitude?: number
 }
 
-interface FooterProps {
+interface MobileFooterProps {
   locationInfo: LocationInfo
   lastUpdated: {
     units?: Date | null
@@ -29,7 +30,7 @@ interface FooterProps {
   }
 }
 
-export function Footer({ locationInfo, lastUpdated }: FooterProps) {
+export function MobileFooter({ locationInfo, lastUpdated }: MobileFooterProps) {
   const [showMap, setShowMap] = useState(false)
   const [mapLoaded, setMapLoaded] = useState(false)
 
@@ -107,39 +108,32 @@ export function Footer({ locationInfo, lastUpdated }: FooterProps) {
   const hasGoogleMapsKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
 
   return (
-    <footer className="bg-white/80 backdrop-blur-sm border-t border-gray-200 mt-12">
-      <div className="container mx-auto px-6 py-8 max-w-7xl">
+    <footer className="bg-white/80 backdrop-blur-sm border-t border-gray-200 mt-8">
+      <div className="container mx-auto px-4 py-6 max-w-md">
         
-        {/* Main Footer Content - Only Location and Operating Hours */}
-        <div className="grid md:grid-cols-2 gap-8 mb-8">
-          
-          {/* Location Info Column */}
-          <div className="space-y-4">
-            <div className="flex items-center gap-3 mb-4">
+        {/* Mobile Location Info */}
+        <Card className="mb-4 border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3 mb-3">
               <div className="p-2 bg-blue-500 rounded-lg">
                 <MapPin className="w-5 h-5 text-white" />
               </div>
-              <h3 className="text-lg font-bold text-gray-900">📍 Location</h3>
+              <h3 className="text-lg font-bold text-blue-900">📍 Location</h3>
             </div>
             
-            <div className="space-y-2">
+            <div className="space-y-2 mb-4">
               <p className="font-semibold text-gray-900">{locationInfo.name}</p>
               <p className="text-gray-600 text-sm leading-relaxed">{locationInfo.address}</p>
-              
-              {locationInfo.latitude && locationInfo.longitude && (
-                <p className="text-xs text-gray-500">
-                  📍 {locationInfo.latitude.toFixed(6)}, {locationInfo.longitude.toFixed(6)}
-                </p>
-              )}
             </div>
 
-            {/* Map Section */}
+            {/* Mobile Map Section */}
             <div className="space-y-3">
               {!showMap ? (
                 <Button 
                   onClick={handleShowMap} 
                   variant="outline" 
-                  className="w-full border-blue-200 text-blue-700 hover:bg-blue-50"
+                  className="w-full border-blue-200 text-blue-700 hover:bg-blue-100"
+                  size="sm"
                 >
                   <Map className="w-4 h-4 mr-2" />
                   Show Map
@@ -164,7 +158,7 @@ export function Footer({ locationInfo, lastUpdated }: FooterProps) {
                   ) : (
                     <div className="aspect-video rounded-lg border bg-gray-100 flex items-center justify-center">
                       <div className="text-center">
-                        <MapPin className="w-12 h-12 text-gray-400 mx-auto mb-2" />
+                        <MapPin className="w-8 h-8 text-gray-400 mx-auto mb-2" />
                         <p className="text-sm text-gray-600">Interactive Map</p>
                       </div>
                     </div>
@@ -192,35 +186,37 @@ export function Footer({ locationInfo, lastUpdated }: FooterProps) {
                 </div>
               )}
             </div>
-          </div>
+          </CardContent>
+        </Card>
 
-          {/* Operating Hours Column */}
-          <div className="space-y-4">
-            <div className="flex items-center gap-3 mb-4">
+        {/* Mobile Operating Hours */}
+        <Card className="mb-4 border-green-200 bg-gradient-to-r from-green-50 to-emerald-50">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3 mb-3">
               <div className="p-2 bg-green-500 rounded-lg">
                 <Clock className="w-5 h-5 text-white" />
               </div>
-              <h3 className="text-lg font-bold text-gray-900">🕒 Operating Hours</h3>
+              <h3 className="text-lg font-bold text-green-900">🕒 Operating Hours</h3>
             </div>
 
             {/* Current Status */}
-            <div className={`p-3 rounded-lg border-2 ${
+            <div className={`p-3 rounded-lg border-2 mb-3 ${
               isCurrentlyOpen 
-                ? 'bg-green-50 border-green-200' 
-                : 'bg-red-50 border-red-200'
+                ? 'bg-green-100 border-green-300' 
+                : 'bg-red-100 border-red-300'
             }`}>
               <div className="flex items-center gap-2 mb-1">
                 <div className={`w-3 h-3 rounded-full ${
                   isCurrentlyOpen ? 'bg-green-500 animate-pulse' : 'bg-red-500'
                 }`}></div>
-                <span className={`font-bold ${
+                <span className={`font-bold text-sm ${
                   isCurrentlyOpen ? 'text-green-800' : 'text-red-800'
                 }`}>
                   {isCurrentlyOpen ? 'Open Now' : 'Closed'}
                 </span>
               </div>
               {todayHours && (
-                <p className={`text-sm ${
+                <p className={`text-xs ${
                   isCurrentlyOpen ? 'text-green-700' : 'text-red-700'
                 }`}>
                   Today: {formatTime(todayHours.open)} - {formatTime(todayHours.close)}
@@ -228,7 +224,7 @@ export function Footer({ locationInfo, lastUpdated }: FooterProps) {
               )}
             </div>
 
-            {/* Week Schedule - Compact */}
+            {/* Week Schedule - Mobile Compact */}
             {locationInfo.operationalHours && (
               <div className="space-y-1">
                 {['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].map(day => {
@@ -237,8 +233,8 @@ export function Footer({ locationInfo, lastUpdated }: FooterProps) {
                   const dayLabel = day.charAt(0).toUpperCase() + day.slice(1, 3)
                   
                   return (
-                    <div key={day} className={`flex justify-between text-sm py-1 px-2 rounded ${
-                      isToday ? 'bg-blue-50 font-medium text-blue-900' : 'text-gray-600'
+                    <div key={day} className={`flex justify-between text-xs py-1 px-2 rounded ${
+                      isToday ? 'bg-blue-100 font-medium text-blue-900' : 'text-gray-600'
                     }`}>
                       <span>{dayLabel}</span>
                       <span>
@@ -252,42 +248,44 @@ export function Footer({ locationInfo, lastUpdated }: FooterProps) {
                 })}
               </div>
             )}
+          </CardContent>
+        </Card>
 
-            {/* Live Data Status */}
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-              <div className="flex items-center gap-2 mb-2">
-                <RefreshCw className="w-4 h-4 text-blue-600" />
-                <span className="text-sm font-medium text-blue-800">Live Updates</span>
-              </div>
-              <div className="space-y-1 text-xs text-blue-700">
-                {lastUpdated.units && (
-                  <p>Units: {lastUpdated.units.toLocaleTimeString()}</p>
-                )}
-                {lastUpdated.fnb && (
-                  <p>Menu: {lastUpdated.fnb.toLocaleTimeString()}</p>
-                )}
-                <p className="text-blue-600">Auto-refresh every 30 seconds</p>
+        {/* Mobile Live Data Status */}
+        <Card className="mb-4 border-purple-200 bg-gradient-to-r from-purple-50 to-blue-50">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <RefreshCw className="w-4 h-4 text-purple-600" />
+              <span className="text-sm font-bold text-purple-800">📊 Live Updates</span>
+            </div>
+            <div className="space-y-2 text-xs text-purple-700">
+              {lastUpdated.units && (
+                <div className="flex justify-between">
+                  <span>Gaming Units:</span>
+                  <span className="font-medium">{lastUpdated.units.toLocaleTimeString()}</span>
+                </div>
+              )}
+              {lastUpdated.fnb && (
+                <div className="flex justify-between">
+                  <span>F&B Menu:</span>
+                  <span className="font-medium">{lastUpdated.fnb.toLocaleTimeString()}</span>
+                </div>
+              )}
+              <div className="text-center pt-2 border-t border-purple-200">
+                <span className="text-purple-600 font-medium">⚡ Auto-refresh every 30 seconds</span>
               </div>
             </div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
 
-        {/* Footer Bottom */}
-        <div className="border-t border-gray-200 pt-6">
-          <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-            <div className="text-center md:text-left">
-              <p className="text-sm text-gray-600">
-                {locationInfo.name} • Live gaming unit status & F&B menu
-              </p>
-              <p className="text-xs text-gray-500 mt-1">
-                Information updates automatically every 30 seconds
-              </p>
-            </div>
-            
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-              <span className="text-xs text-gray-500">Live data</span>
-            </div>
+        {/* Mobile Footer Bottom */}
+        <div className="text-center py-4 border-t border-gray-200">
+          <p className="text-xs text-gray-600 mb-1">
+            {locationInfo.name} • Live gaming unit status & F&B menu
+          </p>
+          <div className="flex items-center justify-center gap-2">
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+            <span className="text-xs text-gray-500">Real-time data</span>
           </div>
         </div>
       </div>
