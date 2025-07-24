@@ -3,7 +3,6 @@
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
 import { 
   GamepadIcon, 
   Clock, 
@@ -20,8 +19,6 @@ import {
 import { formatCurrency } from '@/lib/utils'
 import { Unit } from '@/hooks/use-units-data'
 import { GamesTooltip } from './games-tooltip'
-import { OperationalHours } from './operational-hours'
-import { LocationMap } from './location-map'
 
 interface UnitsCardProps {
   units: Unit[]
@@ -56,7 +53,7 @@ export function UnitsCard({
               Available Now
             </Badge>
           ),
-          cardClass: "border-emerald-200 bg-gradient-to-br from-emerald-50 to-green-50",
+          cardClass: "border-emerald-200 bg-gradient-to-br from-emerald-50 to-green-50 hover:shadow-lg",
           headerClass: "text-emerald-700"
         }
       case 'occupied':
@@ -115,7 +112,7 @@ export function UnitsCard({
     const config = getStatusConfig(unit.status, unit.remainingMinutes)
     
     return (
-      <Card className={`${config.cardClass} border-2 shadow-md hover:shadow-lg transition-all duration-200 h-full`}>
+      <Card className={`${config.cardClass} border-2 shadow-md transition-all duration-200 h-full transform hover:scale-[1.02]`}>
         <CardContent className="p-6 h-full flex flex-col">
           {/* Header with status */}
           <div className="flex items-center justify-between mb-4">
@@ -144,29 +141,31 @@ export function UnitsCard({
               </span>
             </div>
 
-            {/* Pricing Information - Always show for consistency */}
-            <div className="bg-white/70 rounded-lg p-3 border border-white">
-              <div className="space-y-2">
+            {/* Enhanced Pricing Information */}
+            <div className="bg-white/80 rounded-lg p-4 border border-white shadow-sm">
+              <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-gray-700">Hourly Rate</span>
-                  <span className="font-bold text-lg text-gray-900">
+                  <span className="font-bold text-xl text-gray-900">
                     {formatCurrency(unit.hourlyRate)}/hour
                   </span>
                 </div>
                 
                 {/* Package Pricing */}
                 {unit.specifications?.packageRates && Object.keys(unit.specifications.packageRates).length > 0 && (
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-1 mb-1">
-                      <Package className="w-3 h-3 text-gray-500" />
-                      <span className="text-xs font-medium text-gray-600">Package Deals</span>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-1 mb-2">
+                      <Package className="w-4 h-4 text-blue-500" />
+                      <span className="text-sm font-medium text-blue-700">Package Deals</span>
                     </div>
-                    {Object.entries(unit.specifications.packageRates as Record<string, number>).map(([duration, price]) => (
-                      <div key={duration} className="flex justify-between text-xs">
-                        <span className="text-gray-600">{duration.replace('hours', 'h')}</span>
-                        <span className="font-semibold text-gray-800">{formatCurrency(price)}</span>
-                      </div>
-                    ))}
+                    <div className="bg-blue-50 rounded-md p-3 space-y-1">
+                      {Object.entries(unit.specifications.packageRates as Record<string, number>).map(([duration, price]) => (
+                        <div key={duration} className="flex justify-between text-sm">
+                          <span className="text-blue-700 font-medium">{duration.replace('hours', 'h')}</span>
+                          <span className="font-bold text-blue-800">{formatCurrency(price)}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -187,8 +186,11 @@ export function UnitsCard({
 
             {/* Available Games with Enhanced Tooltip */}
             {unit.specifications?.games && Array.isArray(unit.specifications.games) && unit.specifications.games.length > 0 && (
-              <div className="bg-white/50 rounded-lg p-3">
-                <p className="text-xs font-medium text-gray-600 mb-2">Available Games</p>
+              <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg p-3 border border-purple-200">
+                <p className="text-sm font-medium text-purple-700 mb-2 flex items-center gap-1">
+                  <Gamepad2 className="w-4 h-4" />
+                  Available Games
+                </p>
                 <GamesTooltip games={unit.specifications.games} maxVisible={3} />
               </div>
             )}
@@ -199,12 +201,12 @@ export function UnitsCard({
   }
 
   const SectionHeader = ({ title, count, icon }: { title: string; count: number; icon: React.ReactNode }) => (
-    <div className="flex items-center gap-3 mb-4">
-      <div className="p-2 bg-white rounded-lg shadow-sm">
+    <div className="flex items-center gap-3 mb-6">
+      <div className="p-3 bg-white rounded-xl shadow-md">
         {icon}
       </div>
       <div>
-        <h3 className="text-xl font-bold text-gray-900">{title}</h3>
+        <h3 className="text-2xl font-bold text-gray-900">{title}</h3>
         <p className="text-sm text-gray-500">{count} unit{count !== 1 ? 's' : ''}</p>
       </div>
     </div>
@@ -227,7 +229,7 @@ export function UnitsCard({
 
   return (
     <div className="space-y-8">
-      {/* Location Header - Revised without phone */}
+      {/* Location Header - Streamlined */}
       <Card className="border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 shadow-lg">
         <CardContent className="p-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -236,10 +238,10 @@ export function UnitsCard({
                 <MapPin className="w-6 h-6 text-white" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-blue-900 mb-1">
-                  {locationInfo.name}
+                <h1 className="text-3xl font-bold text-blue-900 mb-1">
+                  🎮 {locationInfo.name}
                 </h1>
-                <p className="text-blue-700 mb-3">{locationInfo.address}</p>
+                <p className="text-blue-700 text-lg">{locationInfo.address}</p>
               </div>
             </div>
             
@@ -264,26 +266,13 @@ export function UnitsCard({
         </CardContent>
       </Card>
 
-      {/* Operational Hours */}
-      {locationInfo.operationalHours && Object.keys(locationInfo.operationalHours).length > 0 && (
-        <OperationalHours hours={locationInfo.operationalHours} />
-      )}
-
-      {/* Location Map */}
-      <LocationMap 
-        address={locationInfo.address}
-        latitude={locationInfo.latitude}
-        longitude={locationInfo.longitude}
-        locationName={locationInfo.name}
-      />
-
-      {/* Available Units */}
+      {/* Available Units - PRIORITY #1 */}
       {availableUnits.length > 0 && (
         <div>
           <SectionHeader 
             title="🎮 Available Now" 
             count={availableUnits.length}
-            icon={<Zap className="w-5 h-5 text-emerald-600" />}
+            icon={<Zap className="w-6 h-6 text-emerald-600" />}
           />
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {availableUnits.map((unit) => (
@@ -299,7 +288,7 @@ export function UnitsCard({
           <SectionHeader 
             title="⏱️ Currently Playing" 
             count={occupiedUnits.length}
-            icon={<Timer className="w-5 h-5 text-orange-600" />}
+            icon={<Timer className="w-6 h-6 text-orange-600" />}
           />
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {occupiedUnits.map((unit) => (
@@ -315,7 +304,7 @@ export function UnitsCard({
           <SectionHeader 
             title="🔧 Under Maintenance" 
             count={maintenanceUnits.length}
-            icon={<Wrench className="w-5 h-5 text-yellow-600" />}
+            icon={<Wrench className="w-6 h-6 text-yellow-600" />}
           />
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {maintenanceUnits.map((unit) => (
@@ -331,7 +320,7 @@ export function UnitsCard({
           <SectionHeader 
             title="⚠️ Out of Order" 
             count={brokenUnits.length}
-            icon={<AlertTriangle className="w-5 h-5 text-red-600" />}
+            icon={<AlertTriangle className="w-6 h-6 text-red-600" />}
           />
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {brokenUnits.map((unit) => (
