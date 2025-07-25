@@ -1,4 +1,4 @@
-// src/app/(domains)/customer/[subdomain]/auth/signin/page.tsx - Fixed
+// src/app/customer/[subdomain]/auth/signin/page.tsx
 import { Suspense } from 'react'
 import SignInForm from '@/components/auth/signin-form'
 import { notFound } from 'next/navigation'
@@ -49,6 +49,8 @@ export default async function CustomerSignInPage({ params }: CustomerSignInPageP
   // Await params in Next.js 15
   const { subdomain } = await params
   
+  console.log(`🔐 Customer signin accessed for subdomain: ${subdomain}`)
+  
   // Basic subdomain validation
   if (!subdomain || subdomain.length < 2) {
     console.log('❌ Invalid subdomain:', subdomain)
@@ -63,12 +65,7 @@ export default async function CustomerSignInPage({ params }: CustomerSignInPageP
     notFound()
   }
   
-  if (!tenant.customerPageEnabled) {
-    console.log('❌ Customer page disabled for tenant:', subdomain)
-    notFound()
-  }
-  
-  console.log('✅ Tenant validated for login:', {
+  console.log('✅ Tenant validated for signin:', {
     subdomain: tenant.subdomain,
     name: tenant.name,
     id: tenant.id
@@ -90,8 +87,8 @@ export async function generateMetadata({ params }: CustomerSignInPageProps) {
   const tenant = await validateTenant(subdomain)
   
   return {
-    title: `Staff Login - ${tenant?.name || subdomain}`,
-    description: `Staff and owner login portal for ${tenant?.name || subdomain} gaming center`,
+    title: tenant ? `Staff Login - ${tenant.name}` : `Staff Login - ${subdomain}`,
+    description: tenant ? `Staff and owner login portal for ${tenant.name} gaming center` : 'Staff login portal',
     robots: 'noindex, nofollow', // Don't index login pages
   }
 }

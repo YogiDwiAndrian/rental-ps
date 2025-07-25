@@ -1,9 +1,13 @@
+// src/lib/auth.ts - Updated with Database Audit Logging
 import { PrismaAdapter } from "@next-auth/prisma-adapter"
 import { NextAuthOptions } from "next-auth"
 import CredentialsProvider from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
 import { prisma } from "./prisma"
 import { checkDatabaseConnection } from "./db-health"
+import { FailedLoginRateLimiter } from "./failed-login-rate-limiter"
+import { AuditService } from "./audit-service"
+import { UserRole } from "@prisma/client"
 
 // Define proper types
 type TenantData = {
@@ -18,42 +22,6 @@ type LocationData = {
   code: string
 }[]
 
-// Enhanced audit logging function
-async function auditLoginAttempt(data: {
-  email: string
-  subdomain?: string
-  ip?: string
-  userAgent?: string
-  success: boolean
-  failureReason?: string
-  userId?: string
-  userRole?: string
-}) {
-  try {
-    const auditData = {
-      event: 'LOGIN_ATTEMPT',
-      email: data.email,
-      subdomain: data.subdomain || 'unknown',
-      ip: data.ip || 'unknown',
-      userAgent: data.userAgent || 'unknown',
-      success: data.success,
-      failureReason: data.failureReason,
-      userId: data.userId,
-      userRole: data.userRole,
-      timestamp: new Date().toISOString()
-    }
-    
-    // Console logging for now (will be enhanced with database logging later)
-    console.log('🔐 AUTH AUDIT:', JSON.stringify(auditData, null, 2))
-    
-    // TODO: Store in database audit table
-    // await prisma.auditLog.create({ data: auditData })
-    
-  } catch (error) {
-    console.error('❌ Failed to log audit data:', error)
-  }
-}
-
 export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(prisma),
   providers: [
@@ -65,43 +33,74 @@ export const authOptions: NextAuthOptions = {
         subdomain: { label: "Subdomain", type: "text" }
       },
       async authorize(credentials, req) {
+        const startTime = Date.now()
+
         if (!credentials?.email || !credentials?.password) {
-          await auditLoginAttempt({
+          await AuditService.logAuthEvent({
+            eventType: 'LOGIN_FAILED',
             email: credentials?.email || 'unknown',
-            subdomain: credentials?.subdomain,
             success: false,
-            failureReason: 'EMAIL_PASSWORD_REQUIRED'
+            failureReason: 'EMAIL_PASSWORD_REQUIRED',
+            subdomain: credentials?.subdomain,
+            ...AuditService.getClientInfo(req),
+            responseTime: Date.now() - startTime
           })
           throw new Error('EMAIL_PASSWORD_REQUIRED')
         }
 
         try {
-          // Get IP and User Agent for audit logging
-          const ip = req?.headers?.['x-forwarded-for'] || 
-                    req?.headers?.['x-real-ip'] || 
-                    'unknown'
-          const userAgent = req?.headers?.['user-agent'] || 'unknown'
+          // Get client info for audit logging
+          const clientInfo = AuditService.getClientInfo(req)
 
-          // Step 1: Check database connection first
+          console.log('🔍 Starting authentication process:', {
+            email: credentials.email,
+            ip: clientInfo.ipAddress.replace(/\d+\.\d+\.\d+\.\d+/, '[IP_HIDDEN]'),
+            subdomain: credentials.subdomain
+          })
+
+          // Step 1: Check rate limiting BEFORE any database operations
+          const rateLimitCheck = FailedLoginRateLimiter.isBlocked(clientInfo.ipAddress, credentials.email)
+          
+          if (rateLimitCheck.blocked) {
+            console.log('🚫 Login blocked by rate limiter')
+            await AuditService.logAuthEvent({
+              eventType: 'LOGIN_FAILED',
+              email: credentials.email,
+              success: false,
+              failureReason: 'RATE_LIMITED',
+              subdomain: credentials.subdomain,
+              ...clientInfo,
+              rateLimitInfo: {
+                wasBlocked: true,
+                attempts: rateLimitCheck.attempts,
+                retryAfter: rateLimitCheck.retryAfter
+              },
+              responseTime: Date.now() - startTime
+            })
+            throw new Error(`RATE_LIMITED:${rateLimitCheck.retryAfter}:${rateLimitCheck.attempts}`)
+          }
+
+          // Step 2: Check database connection
           console.log('🔍 Checking database connection...')
           const dbStatus = await checkDatabaseConnection()
           
           if (!dbStatus.isConnected) {
             console.error('❌ Database connection failed:', dbStatus.error)
-            await auditLoginAttempt({
+            await AuditService.logAuthEvent({
+              eventType: 'LOGIN_FAILED',
               email: credentials.email,
-              subdomain: credentials.subdomain,
-              ip: ip as string,
-              userAgent: userAgent as string,
               success: false,
-              failureReason: `DATABASE_CONNECTION_FAILED: ${dbStatus.error}`
+              failureReason: `DATABASE_CONNECTION_FAILED: ${dbStatus.error}`,
+              subdomain: credentials.subdomain,
+              ...clientInfo,
+              responseTime: Date.now() - startTime
             })
             throw new Error(`DATABASE_CONNECTION_FAILED: ${dbStatus.error}`)
           }
           
           console.log(`✅ Database connected (${dbStatus.responseTime}ms)`)
 
-          // Step 2: Find user by email
+          // Step 3: Find user by email
           console.log('🔍 Looking up user:', credentials.email)
           const user = await prisma.user.findUnique({
             where: { email: credentials.email },
@@ -118,48 +117,80 @@ export const authOptions: NextAuthOptions = {
 
           if (!user) {
             console.log('❌ User not found:', credentials.email)
-            await auditLoginAttempt({
+            
+            // Record failed attempt for user not found
+            const rateLimitResult = FailedLoginRateLimiter.recordFailedAttempt(clientInfo.ipAddress, credentials.email)
+            
+            await AuditService.logAuthEvent({
+              eventType: 'LOGIN_FAILED',
               email: credentials.email,
-              subdomain: credentials.subdomain,
-              ip: ip as string,
-              userAgent: userAgent as string,
               success: false,
-              failureReason: 'USER_NOT_FOUND'
+              failureReason: 'USER_NOT_FOUND',
+              subdomain: credentials.subdomain,
+              ...clientInfo,
+              rateLimitInfo: {
+                wasBlocked: rateLimitResult.blocked,
+                attempts: rateLimitResult.attempts,
+                retryAfter: rateLimitResult.retryAfter
+              },
+              responseTime: Date.now() - startTime
             })
             throw new Error('USER_NOT_FOUND')
           }
 
           if (!user.passwordHash) {
             console.log('❌ User has no password hash:', credentials.email)
-            await auditLoginAttempt({
+            
+            // Record failed attempt for no password
+            const rateLimitResult = FailedLoginRateLimiter.recordFailedAttempt(clientInfo.ipAddress, credentials.email)
+            
+            await AuditService.logAuthEvent({
+              eventType: 'LOGIN_FAILED',
               email: credentials.email,
-              subdomain: credentials.subdomain,
-              ip: ip as string,
-              userAgent: userAgent as string,
               success: false,
               failureReason: 'NO_PASSWORD_SET',
               userId: user.id,
-              userRole: user.role
+              userRole: user.role,
+              tenantId: user.tenantId || undefined,
+              subdomain: credentials.subdomain,
+              ...clientInfo,
+              rateLimitInfo: {
+                wasBlocked: rateLimitResult.blocked,
+                attempts: rateLimitResult.attempts,
+                retryAfter: rateLimitResult.retryAfter
+              },
+              responseTime: Date.now() - startTime
             })
             throw new Error('NO_PASSWORD_SET')
           }
 
           if (!user.isActive) {
             console.log('❌ User account is disabled:', credentials.email)
-            await auditLoginAttempt({
+            
+            // Record failed attempt for disabled account
+            const rateLimitResult = FailedLoginRateLimiter.recordFailedAttempt(clientInfo.ipAddress, credentials.email)
+            
+            await AuditService.logAuthEvent({
+              eventType: 'LOGIN_FAILED',
               email: credentials.email,
-              subdomain: credentials.subdomain,
-              ip: ip as string,
-              userAgent: userAgent as string,
               success: false,
               failureReason: 'ACCOUNT_DISABLED',
               userId: user.id,
-              userRole: user.role
+              userRole: user.role,
+              tenantId: user.tenantId || undefined,
+              subdomain: credentials.subdomain,
+              ...clientInfo,
+              rateLimitInfo: {
+                wasBlocked: rateLimitResult.blocked,
+                attempts: rateLimitResult.attempts,
+                retryAfter: rateLimitResult.retryAfter
+              },
+              responseTime: Date.now() - startTime
             })
             throw new Error('ACCOUNT_DISABLED')
           }
 
-          // Step 3: Verify password
+          // Step 4: Verify password - CRITICAL: This is where most failed attempts happen
           console.log('🔍 Verifying password...')
           const isPasswordValid = await bcrypt.compare(
             credentials.password,
@@ -168,33 +199,56 @@ export const authOptions: NextAuthOptions = {
 
           if (!isPasswordValid) {
             console.log('❌ Invalid password for user:', credentials.email)
-            await auditLoginAttempt({
+            
+            // Record failed attempt for invalid password - MAIN CASE
+            const rateLimitResult = FailedLoginRateLimiter.recordFailedAttempt(clientInfo.ipAddress, credentials.email)
+            
+            await AuditService.logAuthEvent({
+              eventType: 'LOGIN_FAILED',
               email: credentials.email,
-              subdomain: credentials.subdomain,
-              ip: ip as string,
-              userAgent: userAgent as string,
               success: false,
               failureReason: 'INVALID_PASSWORD',
               userId: user.id,
-              userRole: user.role
+              userRole: user.role,
+              tenantId: user.tenantId || undefined,
+              subdomain: credentials.subdomain,
+              ...clientInfo,
+              rateLimitInfo: {
+                wasBlocked: rateLimitResult.blocked,
+                attempts: rateLimitResult.attempts,
+                retryAfter: rateLimitResult.retryAfter
+              },
+              responseTime: Date.now() - startTime
             })
+            
+            // If blocked after this attempt, include retry info in error
+            if (rateLimitResult.blocked) {
+              throw new Error(`INVALID_PASSWORD_BLOCKED:${rateLimitResult.retryAfter}:${rateLimitResult.attempts}`)
+            }
+            
             throw new Error('INVALID_PASSWORD')
           }
 
           console.log('✅ Password verified for user:', credentials.email)
 
-          // Step 4: Handle super_admin (no tenant validation needed)
+          // Step 5: Handle super_admin (no tenant validation needed)
           if (user.role === 'super_admin') {
             console.log('✅ Super admin login successful:', credentials.email)
-            await auditLoginAttempt({
+            
+            // Clear failed attempts on successful login
+            FailedLoginRateLimiter.clearFailedAttempts(clientInfo.ipAddress, credentials.email)
+            
+            await AuditService.logAuthEvent({
+              eventType: 'LOGIN_SUCCESS',
               email: credentials.email,
-              subdomain: credentials.subdomain,
-              ip: ip as string,
-              userAgent: userAgent as string,
               success: true,
               userId: user.id,
-              userRole: user.role
+              userRole: user.role,
+              subdomain: credentials.subdomain,
+              ...clientInfo,
+              responseTime: Date.now() - startTime
             })
+
             return {
               id: user.id,
               email: user.email,
@@ -206,50 +260,77 @@ export const authOptions: NextAuthOptions = {
             }
           }
 
-          // Step 5: For owner/staff - validate tenant is assigned
+          // Step 6: For owner/staff - validate tenant is assigned
           if (!user.tenant) {
             console.log('❌ User has no tenant assigned:', credentials.email)
-            await auditLoginAttempt({
+            
+            // Record failed attempt for no tenant
+            const rateLimitResult = FailedLoginRateLimiter.recordFailedAttempt(clientInfo.ipAddress, credentials.email)
+            
+            await AuditService.logAuthEvent({
+              eventType: 'LOGIN_FAILED',
               email: credentials.email,
-              subdomain: credentials.subdomain,
-              ip: ip as string,
-              userAgent: userAgent as string,
               success: false,
               failureReason: 'NO_TENANT_ASSIGNED',
               userId: user.id,
-              userRole: user.role
+              userRole: user.role,
+              subdomain: credentials.subdomain,
+              ...clientInfo,
+              rateLimitInfo: {
+                wasBlocked: rateLimitResult.blocked,
+                attempts: rateLimitResult.attempts,
+                retryAfter: rateLimitResult.retryAfter
+              },
+              responseTime: Date.now() - startTime
             })
             throw new Error('NO_TENANT_ASSIGNED')
           }
 
-          // Step 6: Validate subdomain access for owner/staff
+          // Step 7: Validate subdomain access for owner/staff
           if (credentials.subdomain && user.tenant.subdomain !== credentials.subdomain) {
             console.log('❌ User does not have access to tenant:', credentials.subdomain)
-            await auditLoginAttempt({
+            
+            // Record failed attempt for tenant access denied
+            const rateLimitResult = FailedLoginRateLimiter.recordFailedAttempt(clientInfo.ipAddress, credentials.email)
+            
+            await AuditService.logAuthEvent({
+              eventType: 'LOGIN_FAILED',
               email: credentials.email,
-              subdomain: credentials.subdomain,
-              ip: ip as string,
-              userAgent: userAgent as string,
               success: false,
               failureReason: 'TENANT_ACCESS_DENIED',
               userId: user.id,
-              userRole: user.role
+              userRole: user.role,
+              tenantId: user.tenantId || undefined,
+              subdomain: credentials.subdomain,
+              ...clientInfo,
+              rateLimitInfo: {
+                wasBlocked: rateLimitResult.blocked,
+                attempts: rateLimitResult.attempts,
+                retryAfter: rateLimitResult.retryAfter
+              },
+              responseTime: Date.now() - startTime
             })
             throw new Error('TENANT_ACCESS_DENIED')
           }
 
           console.log('✅ Login successful for user:', credentials.email)
-          await auditLoginAttempt({
+          
+          // Clear failed attempts on successful login - IMPORTANT!
+          FailedLoginRateLimiter.clearFailedAttempts(clientInfo.ipAddress, credentials.email)
+          
+          await AuditService.logAuthEvent({
+            eventType: 'LOGIN_SUCCESS',
             email: credentials.email,
-            subdomain: credentials.subdomain,
-            ip: ip as string,
-            userAgent: userAgent as string,
             success: true,
             userId: user.id,
-            userRole: user.role
+            userRole: user.role,
+                          tenantId: user.tenantId || undefined,
+            subdomain: credentials.subdomain,
+            ...clientInfo,
+            responseTime: Date.now() - startTime
           })
 
-          // Step 7: Return user data for owner/staff
+          // Step 8: Return user data for owner/staff
           return {
             id: user.id,
             email: user.email,
@@ -271,21 +352,28 @@ export const authOptions: NextAuthOptions = {
         } catch (error) {
           console.error('🚨 Authorization error:', error)
           
-          // Re-throw our custom errors
-          if (error instanceof Error && error.message.startsWith('DATABASE_CONNECTION_FAILED')) {
-            throw error
-          }
-          if (error instanceof Error && ['USER_NOT_FOUND', 'INVALID_PASSWORD', 'ACCOUNT_DISABLED', 'NO_PASSWORD_SET', 'TENANT_ACCESS_DENIED', 'NO_TENANT_ASSIGNED'].includes(error.message)) {
-            throw error
+          // Re-throw our custom errors (including rate limit errors)
+          if (error instanceof Error) {
+            if (error.message.startsWith('DATABASE_CONNECTION_FAILED') ||
+                error.message.startsWith('RATE_LIMITED') ||
+                error.message.startsWith('INVALID_PASSWORD_BLOCKED') ||
+                ['USER_NOT_FOUND', 'INVALID_PASSWORD', 'ACCOUNT_DISABLED', 'NO_PASSWORD_SET', 'TENANT_ACCESS_DENIED', 'NO_TENANT_ASSIGNED'].includes(error.message)) {
+              throw error
+            }
           }
           
           // Handle unexpected errors
           console.error('Unexpected auth error:', error)
-          await auditLoginAttempt({
+          const clientInfo = AuditService.getClientInfo(req)
+          
+          await AuditService.logAuthEvent({
+            eventType: 'LOGIN_FAILED',
             email: credentials.email,
-            subdomain: credentials.subdomain,
             success: false,
-            failureReason: 'SYSTEM_ERROR'
+            failureReason: 'SYSTEM_ERROR',
+            subdomain: credentials.subdomain,
+            ...clientInfo,
+            responseTime: Date.now() - startTime
           })
           throw new Error('SYSTEM_ERROR')
         }
@@ -326,7 +414,7 @@ export const authOptions: NextAuthOptions = {
   },
   events: {
     async signIn({ user, account }) {
-      // Enhanced login success logging
+      // Enhanced login success logging with database audit
       if (user.id) {
         try {
           // Update last login time
@@ -335,8 +423,18 @@ export const authOptions: NextAuthOptions = {
             data: { lastLoginAt: new Date() }
           })
           
-          // Success audit log
-          console.log('✅ LOGIN SUCCESS:', {
+          // Database audit log for successful sign in
+          await AuditService.logAuthEvent({
+            eventType: 'LOGIN_SUCCESS',
+            email: user.email || 'unknown',
+            success: true,
+            userId: user.id,
+            userRole: user.role as UserRole,
+            ipAddress: 'nextauth-callback',
+            userAgent: 'nextauth-event'
+          })
+          
+          console.log('✅ LOGIN SUCCESS EVENT:', {
             userId: user.id,
             email: user.email,
             role: user.role,
@@ -344,18 +442,37 @@ export const authOptions: NextAuthOptions = {
           })
           
         } catch (error) {
-          console.error('Failed to update last login time:', error)
+          console.error('Failed to update last login time or log event:', error)
           // Don't throw error here, login should still succeed
         }
       }
     },
     async signOut({ session, token }) {
-      // Logout audit log
-      console.log('🚪 LOGOUT:', {
-        userId: token?.sub || session?.user?.id,
-        email: session?.user?.email,
-        timestamp: new Date().toISOString()
-      })
+      // Database audit log for logout
+      try {
+        const userId = token?.sub || session?.user?.id
+        const email = session?.user?.email
+        
+        if (userId && email) {
+          await AuditService.logAuthEvent({
+            eventType: 'LOGOUT',
+            email,
+            success: true,
+            userId,
+            ipAddress: 'nextauth-callback',
+            userAgent: 'nextauth-event'
+          })
+        }
+        
+        console.log('🚪 LOGOUT EVENT:', {
+          userId,
+          email,
+          timestamp: new Date().toISOString()
+        })
+        
+      } catch (error) {
+        console.error('Failed to log logout event:', error)
+      }
     }
   }
 }

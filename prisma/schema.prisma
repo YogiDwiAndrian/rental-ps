@@ -1,4 +1,4 @@
-// prisma/schema.prisma - ENHANCED VERSION
+// prisma/schema.prisma - Updated with Comprehensive Audit Logs
 generator client {
   provider = "prisma-client-js"
 }
@@ -8,63 +8,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ============================================
-// ENUMS
-// ============================================
-
-enum UserRole {
-  super_admin
-  owner
-  staff
-}
-
-enum UnitStatus {
-  available
-  occupied
-  maintenance
-  broken
-}
-
-enum BillingType {
-  timer
-  hourly
-  package
-  hybrid
-}
-
-enum SessionStatus {
-  active
-  completed
-  cancelled
-  power_outage_stopped
-}
-
-enum PaymentStatus {
-  pending
-  paid
-  failed
-  refunded
-}
-
-enum TransactionType {
-  rental
-  fnb
-  extension
-  refund
-}
-
-// NEW ENUM for WhatsApp contact roles
-enum ContactRole {
-  owner
-  manager
-  staff
-  custom
-}
-
-// ============================================
-// NEXTAUTH MODELS (Required for Authentication)
-// ============================================
-
+// NextAuth.js required models
 model Account {
   id                String  @id @default(cuid())
   userId            String  @map("user_id")
@@ -97,22 +41,19 @@ model Session {
 
 model VerificationToken {
   identifier String
-  token      String
+  token      String   @unique
   expires    DateTime
 
   @@unique([identifier, token])
   @@map("verificationtokens")
 }
 
-// ============================================
-// CORE BUSINESS MODELS
-// ============================================
-
+// Core business models
 model Tenant {
   id                  String   @id @default(cuid())
   name                String
   subdomain           String   @unique
-  customDomain        String?  @unique @map("custom_domain")
+  customDomain        String?  @map("custom_domain")
   domainVerified      Boolean  @default(false) @map("domain_verified")
   customerPageEnabled Boolean  @default(true) @map("customer_page_enabled")
   ownerId             String?  @map("owner_id")
@@ -124,17 +65,21 @@ model Tenant {
   updatedAt           DateTime @updatedAt @map("updated_at")
 
   // Relations
-  users              User[]
-  locations          Location[]
-  fnbCategories      FnbCategory[]
-  fnbItems           FnbItem[]
-  fnbOrders          FnbOrder[]
-  rentalSessions     RentalSession[]
-  transactions       Transaction[]
-  customerPageConfig CustomerPageConfig[]
-  whatsappContacts   WhatsAppContact[] // NEW: WhatsApp contacts
+  users               User[]
+  locations           Location[]
+  whatsappContacts    WhatsAppContact[]
+  customerPageConfigs CustomerPageConfig[]
+  auditLogs           AuditLog[]
 
   @@map("tenants")
+}
+
+enum UserRole {
+  super_admin
+  owner
+  staff
+
+  @@map("UserRole")
 }
 
 model User {
@@ -155,242 +100,160 @@ model User {
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
   // Relations
-  tenant              Tenant?                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  locationAssignments UserLocationAssignment[]
-  rentalSessions      RentalSession[]
-  transactions        Transaction[]
-  sessionExtensions   SessionExtension[]
-  powerOutageEvents   PowerOutageEvent[]
-  whatsappContacts    WhatsAppContact[] // NEW: WhatsApp contacts relation
-
-  // NextAuth relations
-  accounts Account[]
-  sessions Session[]
+  tenant              Tenant?              @relation(fields: [tenantId], references: [id])
+  accounts            Account[]
+  sessions            Session[]
+  locationAssignments LocationAssignment[]
+  whatsappContacts    WhatsAppContact[]
+  auditLogs           AuditLog[]
 
   @@map("users")
 }
 
 model Location {
-  id                 String  @id @default(cuid())
-  tenantId           String  @map("tenant_id")
+  id                 String   @id @default(cuid())
+  tenantId           String   @map("tenant_id")
   name               String
   code               String
-  address            String
+  address            String?
   phone              String?
   email              String?
-  managerId          String? @map("manager_id")
-  publicDescription  String? @map("public_description")
-  operationalHours   Json    @default("{}") @map("operational_hours")
-  settings           Json    @default("{}")
-  showOnCustomerPage Boolean @default(true) @map("show_on_customer_page")
-  isActive           Boolean @default(true) @map("is_active")
-
-  // NEW: Maps and location enhancements
-  latitude    Decimal? @db.Decimal(10, 8)
-  longitude   Decimal? @db.Decimal(11, 8)
-  mapsPlaceId String?  @map("maps_place_id")
-  timezone    String   @default("Asia/Jakarta")
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  publicDescription  String?  @map("public_description")
+  operationalHours   Json?    @map("operational_hours")
+  latitude           Decimal? @db.Decimal(10, 8)
+  longitude          Decimal? @db.Decimal(11, 8)
+  showOnCustomerPage Boolean  @default(true) @map("show_on_customer_page")
+  isActive           Boolean  @default(true) @map("is_active")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
 
   // Relations
-  tenant             Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  userAssignments    UserLocationAssignment[]
-  units              Unit[]
-  rentalSessions     RentalSession[]
-  fnbCategories      FnbCategory[]
-  fnbItems           FnbItem[]
-  fnbOrders          FnbOrder[]
-  transactions       Transaction[]
-  powerOutageEvents  PowerOutageEvent[]
-  customerPageConfig CustomerPageConfig[]
-  whatsappContacts   WhatsAppContact[] // NEW: Location-specific contacts
+  tenant              Tenant               @relation(fields: [tenantId], references: [id])
+  locationAssignments LocationAssignment[]
+  units               Unit[]
+  fnbItems            FnbItem[]
+  fnbCategories       FnbCategory[]
+  whatsappContacts    WhatsAppContact[]
+  customerPageConfigs CustomerPageConfig[]
+  rentalSessions      RentalSession[]
+  transactions        Transaction[]
+  auditLogs           AuditLog[]
 
   @@unique([tenantId, code])
-  @@unique([tenantId, name])
   @@map("locations")
 }
 
-model UserLocationAssignment {
+model LocationAssignment {
   id         String   @id @default(cuid())
   userId     String   @map("user_id")
   locationId String   @map("location_id")
-  assignedBy String   @map("assigned_by")
-  assignedAt DateTime @default(now()) @map("assigned_at")
   isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
 
   // Relations
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id])
+  location Location @relation(fields: [locationId], references: [id])
 
   @@unique([userId, locationId])
-  @@map("user_location_assignments")
+  @@map("location_assignments")
+}
+
+enum UnitStatus {
+  available
+  occupied
+  maintenance
+  broken
+
+  @@map("UnitStatus")
 }
 
 model Unit {
   id                  String     @id @default(cuid())
-  tenantId            String     @map("tenant_id")
   locationId          String     @map("location_id")
   name                String
   consoleType         String     @map("console_type")
-  controllerCount     Int        @default(1) @map("controller_count")
+  controllerCount     Int        @default(2) @map("controller_count")
   status              UnitStatus @default(available)
-  hourlyRate          Decimal    @map("hourly_rate") @db.Decimal(8, 2)
-  packageRates        Json       @default("{}") @map("package_rates")
-  specifications      Json       @default("{}")
-  showOnCustomerPage  Boolean    @default(true) @map("show_on_customer_page")
+  hourlyRate          Decimal    @map("hourly_rate") @db.Decimal(10, 2)
   customerDisplayName String?    @map("customer_display_name")
+  specifications      Json?
+  packageRates        Json?      @map("package_rates")
+  showOnCustomerPage  Boolean    @default(true) @map("show_on_customer_page")
   isActive            Boolean    @default(true) @map("is_active")
   createdAt           DateTime   @default(now()) @map("created_at")
   updatedAt           DateTime   @updatedAt @map("updated_at")
 
   // Relations
-  location       Location        @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  location       Location        @relation(fields: [locationId], references: [id])
   rentalSessions RentalSession[]
 
   @@unique([locationId, name])
   @@map("units")
 }
 
-// ============================================
-// NEW: WHATSAPP CONTACTS MODEL
-// ============================================
+enum BillingType {
+  timer
+  hourly
+  package
+  hybrid
 
-model WhatsAppContact {
-  id                   String      @id @default(cuid())
-  tenantId             String      @map("tenant_id")
-  locationId           String?     @map("location_id") // NULL = global contact for all locations
-  userId               String?     @map("user_id") // Link to actual user if exists
-  name                 String
-  whatsappNumber       String      @map("whatsapp_number")
-  role                 ContactRole
-  isPrimary            Boolean     @default(false) @map("is_primary")
-  isActive             Boolean     @default(true) @map("is_active")
-  responseTime         String?     @map("response_time") // e.g., "5 minutes", "1 hour"
-  availabilitySchedule Json        @default("{}") @map("availability_schedule")
-  displayOrder         Int         @default(0) @map("display_order")
-  notes                String? // Internal notes about this contact
-  createdAt            DateTime    @default(now()) @map("created_at")
-  updatedAt            DateTime    @updatedAt @map("updated_at")
-
-  // Relations
-  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  location Location? @relation(fields: [locationId], references: [id], onDelete: Cascade)
-  user     User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  // Indexes for performance
-  @@index([tenantId, locationId])
-  @@index([isActive, displayOrder])
-  @@map("whatsapp_contacts")
+  @@map("BillingType")
 }
 
-// ============================================
-// RENTAL SYSTEM MODELS
-// ============================================
+enum SessionStatus {
+  active
+  completed
+  cancelled
+  power_outage_stopped
+
+  @@map("SessionStatus")
+}
 
 model RentalSession {
-  id                  String        @id @default(cuid())
-  tenantId            String        @map("tenant_id")
-  locationId          String        @map("location_id")
-  unitId              String        @map("unit_id")
-  staffId             String        @map("staff_id")
-  billingModel        BillingType   @map("billing_model")
-  startTime           DateTime      @map("start_time")
-  endTime             DateTime?     @map("end_time")
-  purchasedDuration   Int?          @map("purchased_duration") // minutes
-  extendedDuration    Int           @default(0) @map("extended_duration")
-  sessionIdentifier   String?       @map("session_identifier")
-  totalAmount         Decimal?      @map("total_amount") @db.Decimal(10, 2)
-  psAmount            Decimal?      @map("ps_amount") @db.Decimal(10, 2)
-  fnbAmount           Decimal       @default(0) @map("fnb_amount") @db.Decimal(10, 2)
-  status              SessionStatus @default(active)
-  paymentStatus       PaymentStatus @default(pending) @map("payment_status")
-  paymentMethod       String        @default("cash") @map("payment_method")
-  powerOutageEventId  String?       @map("power_outage_event_id")
-  emergencyStopReason String?       @map("emergency_stop_reason")
-  notes               String?
-  createdAt           DateTime      @default(now()) @map("created_at")
-  updatedAt           DateTime      @updatedAt @map("updated_at")
+  id                String        @id @default(cuid())
+  locationId        String        @map("location_id")
+  unitId            String        @map("unit_id")
+  billingModel      BillingType   @map("billing_model")
+  status            SessionStatus @default(active)
+  startTime         DateTime      @map("start_time")
+  endTime           DateTime?     @map("end_time")
+  purchasedDuration Int           @default(0) @map("purchased_duration")
+  extendedDuration  Int           @default(0) @map("extended_duration")
+  totalAmount       Decimal       @map("total_amount") @db.Decimal(10, 2)
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
 
   // Relations
-  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  location          Location           @relation(fields: [locationId], references: [id], onDelete: Cascade)
-  unit              Unit               @relation(fields: [unitId], references: [id])
-  staff             User               @relation(fields: [staffId], references: [id])
-  powerOutageEvent  PowerOutageEvent?  @relation(fields: [powerOutageEventId], references: [id])
-  sessionExtensions SessionExtension[]
-  fnbOrders         FnbOrder[]
-  transactions      Transaction[]
+  location     Location      @relation(fields: [locationId], references: [id])
+  unit         Unit          @relation(fields: [unitId], references: [id])
+  transactions Transaction[]
+  fnbOrders    FnbOrder[]
 
   @@map("rental_sessions")
 }
 
-model SessionExtension {
-  id                   String        @id @default(cuid())
-  sessionId            String        @map("session_id")
-  extendedDuration     Int           @map("extended_duration") // minutes
-  additionalAmount     Decimal       @map("additional_amount") @db.Decimal(10, 2)
-  originalBillingModel BillingType?  @map("original_billing_model")
-  extensionType        String?       @map("extension_type")
-  paymentStatus        PaymentStatus @default(pending) @map("payment_status")
-  extendedBy           String        @map("extended_by")
-  createdAt            DateTime      @default(now()) @map("created_at")
-
-  // Relations
-  session        RentalSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  extendedByUser User          @relation(fields: [extendedBy], references: [id])
-
-  @@map("session_extensions")
-}
-
-model PowerOutageEvent {
-  id                  String    @id @default(cuid())
-  locationId          String    @map("location_id")
-  triggeredBy         String    @map("triggered_by")
-  triggeredAt         DateTime  @map("triggered_at")
-  affectedSessions    Int       @map("affected_sessions")
-  totalRevenueSecured Decimal   @map("total_revenue_secured") @db.Decimal(10, 2)
-  recoveryTime        DateTime? @map("recovery_time")
-  notes               String?
-  createdAt           DateTime  @default(now()) @map("created_at")
-
-  // Relations
-  location               Location        @relation(fields: [locationId], references: [id])
-  triggeredByUser        User            @relation(fields: [triggeredBy], references: [id])
-  affectedRentalSessions RentalSession[]
-
-  @@map("power_outage_events")
-}
-
-// ============================================
-// F&B SYSTEM MODELS
-// ============================================
-
 model FnbCategory {
   id           String   @id @default(cuid())
-  tenantId     String   @map("tenant_id")
-  locationId   String?  @map("location_id")
+  locationId   String   @map("location_id")
   name         String
-  description  String?
   displayOrder Int      @default(0) @map("display_order")
   isActive     Boolean  @default(true) @map("is_active")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   // Relations
-  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  location Location? @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  location Location  @relation(fields: [locationId], references: [id])
   fnbItems FnbItem[]
 
+  @@unique([locationId, name])
   @@map("fnb_categories")
 }
 
 model FnbItem {
   id                  String   @id @default(cuid())
-  tenantId            String   @map("tenant_id")
-  locationId          String?  @map("location_id")
-  categoryId          String?  @map("category_id")
+  locationId          String   @map("location_id")
+  categoryId          String   @map("category_id")
   name                String
   description         String?
   sellingPrice        Decimal  @map("selling_price") @db.Decimal(10, 2)
@@ -398,135 +261,327 @@ model FnbItem {
   stockQuantity       Int      @default(0) @map("stock_quantity")
   minStockAlert       Int      @default(5) @map("min_stock_alert")
   unitType            String   @default("pcs") @map("unit_type")
-  showOnCustomerPage  Boolean  @default(true) @map("show_on_customer_page")
   customerDisplayName String?  @map("customer_display_name")
   customerDescription String?  @map("customer_description")
   displayOrder        Int      @default(0) @map("display_order")
+  showOnCustomerPage  Boolean  @default(true) @map("show_on_customer_page")
   isActive            Boolean  @default(true) @map("is_active")
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
 
   // Relations
-  tenant    Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  location  Location?    @relation(fields: [locationId], references: [id], onDelete: Cascade)
-  category  FnbCategory? @relation(fields: [categoryId], references: [id])
-  fnbOrders FnbOrder[]
+  location      Location       @relation(fields: [locationId], references: [id])
+  category      FnbCategory    @relation(fields: [categoryId], references: [id])
+  fnbOrderItems FnbOrderItem[]
 
-  @@unique([locationId, name])
+  @@unique([locationId, categoryId, name])
   @@map("fnb_items")
 }
 
 model FnbOrder {
-  id              String        @id @default(cuid())
-  tenantId        String        @map("tenant_id")
-  locationId      String        @map("location_id")
-  rentalSessionId String?       @map("rental_session_id")
-  fnbItemId       String        @map("fnb_item_id")
-  quantity        Int
-  unitPrice       Decimal       @map("unit_price") @db.Decimal(10, 2)
-  totalAmount     Decimal       @map("total_amount") @db.Decimal(10, 2)
-  paymentTiming   String        @default("end_of_session") @map("payment_timing")
-  paymentStatus   PaymentStatus @default(pending) @map("payment_status")
-  orderNotes      String?       @map("order_notes")
-  servedAt        DateTime?     @map("served_at")
-  createdAt       DateTime      @default(now()) @map("created_at")
-  updatedAt       DateTime      @updatedAt @map("updated_at")
+  id              String   @id @default(cuid())
+  rentalSessionId String?  @map("rental_session_id")
+  totalAmount     Decimal  @map("total_amount") @db.Decimal(10, 2)
+  status          String   @default("completed")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
   // Relations
-  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  location      Location       @relation(fields: [locationId], references: [id], onDelete: Cascade)
   rentalSession RentalSession? @relation(fields: [rentalSessionId], references: [id])
-  fnbItem       FnbItem        @relation(fields: [fnbItemId], references: [id])
+  fnbOrderItems FnbOrderItem[]
+  transactions  Transaction[]
 
   @@map("fnb_orders")
 }
 
-// ============================================
-// FINANCIAL MODELS
-// ============================================
-
-model Transaction {
-  id            String          @id @default(cuid())
-  tenantId      String          @map("tenant_id")
-  locationId    String          @map("location_id")
-  sessionId     String?         @map("session_id")
-  staffId       String          @map("staff_id")
-  type          TransactionType
-  totalAmount   Decimal         @map("total_amount") @db.Decimal(10, 2)
-  psAmount      Decimal         @default(0) @map("ps_amount") @db.Decimal(10, 2)
-  fnbAmount     Decimal         @default(0) @map("fnb_amount") @db.Decimal(10, 2)
-  paymentMethod String          @default("cash") @map("payment_method")
-  paymentStatus PaymentStatus   @default(pending) @map("payment_status")
-  receiptNumber String?         @map("receipt_number")
-  receiptData   Json?           @map("receipt_data")
-  notes         String?
-  createdAt     DateTime        @default(now()) @map("created_at")
-  updatedAt     DateTime        @updatedAt @map("updated_at")
+model FnbOrderItem {
+  id         String   @id @default(cuid())
+  fnbOrderId String   @map("fnb_order_id")
+  fnbItemId  String   @map("fnb_item_id")
+  quantity   Int
+  unitPrice  Decimal  @map("unit_price") @db.Decimal(10, 2)
+  totalPrice Decimal  @map("total_price") @db.Decimal(10, 2)
+  createdAt  DateTime @default(now()) @map("created_at")
 
   // Relations
-  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  location Location       @relation(fields: [locationId], references: [id], onDelete: Cascade)
-  session  RentalSession? @relation(fields: [sessionId], references: [id])
-  staff    User           @relation(fields: [staffId], references: [id])
+  fnbOrder FnbOrder @relation(fields: [fnbOrderId], references: [id])
+  fnbItem  FnbItem  @relation(fields: [fnbItemId], references: [id])
+
+  @@map("fnb_order_items")
+}
+
+enum PaymentStatus {
+  pending
+  paid
+  failed
+  refunded
+
+  @@map("PaymentStatus")
+}
+
+enum TransactionType {
+  rental
+  fnb
+  extension
+  refund
+
+  @@map("TransactionType")
+}
+
+model Transaction {
+  id              String          @id @default(cuid())
+  locationId      String          @map("location_id")
+  rentalSessionId String?         @map("rental_session_id")
+  fnbOrderId      String?         @map("fnb_order_id")
+  type            TransactionType
+  amount          Decimal         @db.Decimal(10, 2)
+  paymentStatus   PaymentStatus   @default(pending) @map("payment_status")
+  paymentMethod   String          @default("cash") @map("payment_method")
+  description     String?
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  // Relations
+  location      Location       @relation(fields: [locationId], references: [id])
+  rentalSession RentalSession? @relation(fields: [rentalSessionId], references: [id])
+  fnbOrder      FnbOrder?      @relation(fields: [fnbOrderId], references: [id])
 
   @@map("transactions")
 }
 
-// ============================================
-// CONFIGURATION MODELS
-// ============================================
+enum ContactRole {
+  owner
+  manager
+  staff
+  custom
 
-model CustomerPageConfig {
-  id                       String  @id @default(cuid())
-  tenantId                 String  @map("tenant_id")
-  locationId               String? @map("location_id")
-  showUnitStatus           Boolean @default(true) @map("show_unit_status")
-  showRemainingTime        Boolean @default(true) @map("show_remaining_time")
-  showPricing              Boolean @default(true) @map("show_pricing")
-  showFnbMenu              Boolean @default(true) @map("show_fnb_menu")
-  showContactInfo          Boolean @default(true) @map("show_contact_info")
-  unitStatusRefreshSeconds Int     @default(30) @map("unit_status_refresh_seconds")
-  fnbMenuRefreshSeconds    Int     @default(300) @map("fnb_menu_refresh_seconds")
-  primaryColor             String  @default("#3B82F6") @map("primary_color")
-  publicPhone              String? @map("public_phone")
-  publicEmail              String? @map("public_email")
-  publicAddress            String? @map("public_address")
-  whatsappNumber           String? @map("whatsapp_number")
+  @@map("ContactRole")
+}
 
-  // NEW: Maps and display enhancements
-  showMaps             Boolean @default(true) @map("show_maps")
-  showOperationalHours Boolean @default(true) @map("show_operational_hours")
-  googleMapsApiKey     String? @map("google_maps_api_key")
-
-  isActive  Boolean  @default(true) @map("is_active")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+model WhatsAppContact {
+  id                   String      @id @default(cuid())
+  tenantId             String      @map("tenant_id")
+  locationId           String?     @map("location_id")
+  userId               String?     @map("user_id")
+  name                 String
+  whatsappNumber       String      @map("whatsapp_number")
+  role                 ContactRole @default(staff)
+  isPrimary            Boolean     @default(false) @map("is_primary")
+  responseTime         String?     @map("response_time")
+  availabilitySchedule Json?       @map("availability_schedule")
+  displayOrder         Int         @default(0) @map("display_order")
+  isActive             Boolean     @default(true) @map("is_active")
+  createdAt            DateTime    @default(now()) @map("created_at")
+  updatedAt            DateTime    @updatedAt @map("updated_at")
 
   // Relations
-  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  location Location? @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  tenant   Tenant    @relation(fields: [tenantId], references: [id])
+  location Location? @relation(fields: [locationId], references: [id])
+  user     User?     @relation(fields: [userId], references: [id])
+
+  @@map("whatsapp_contacts")
+}
+
+model CustomerPageConfig {
+  id                       String   @id @default(cuid())
+  tenantId                 String   @map("tenant_id")
+  locationId               String   @map("location_id")
+  showUnitStatus           Boolean  @default(true) @map("show_unit_status")
+  showRemainingTime        Boolean  @default(true) @map("show_remaining_time")
+  showPricing              Boolean  @default(true) @map("show_pricing")
+  showFnbMenu              Boolean  @default(true) @map("show_fnb_menu")
+  showContactInfo          Boolean  @default(true) @map("show_contact_info")
+  showMaps                 Boolean  @default(false) @map("show_maps")
+  showOperationalHours     Boolean  @default(true) @map("show_operational_hours")
+  unitStatusRefreshSeconds Int      @default(30) @map("unit_status_refresh_seconds")
+  fnbMenuRefreshSeconds    Int      @default(300) @map("fnb_menu_refresh_seconds")
+  primaryColor             String   @default("#3B82F6") @map("primary_color")
+  publicPhone              String?  @map("public_phone")
+  publicEmail              String?  @map("public_email")
+  publicAddress            String?  @map("public_address")
+  whatsappNumber           String?  @map("whatsapp_number")
+  isActive                 Boolean  @default(true) @map("is_active")
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  tenant   Tenant   @relation(fields: [tenantId], references: [id])
+  location Location @relation(fields: [locationId], references: [id])
 
   @@unique([tenantId, locationId])
-  @@map("customer_page_config")
+  @@map("customer_page_configs")
 }
 
 model LandingPageConfig {
-  id                 String   @id @default(cuid())
+  id                 String   @id @default("default")
   companyName        String   @default("RentalPS Platform") @map("company_name")
-  companyDescription String?  @map("company_description")
+  companyDescription String   @default("Platform SaaS untuk Rental PlayStation") @map("company_description")
   starterPrice       Int      @default(150000) @map("starter_price")
-  starterFeatures    Json     @default("[]") @map("starter_features")
+  starterFeatures    String[] @map("starter_features")
   premiumPrice       Int      @default(250000) @map("premium_price")
-  premiumFeatures    Json     @default("[]") @map("premium_features")
+  premiumFeatures    String[] @map("premium_features")
   enterprisePrice    Int      @default(500000) @map("enterprise_price")
-  enterpriseFeatures Json     @default("[]") @map("enterprise_features")
-  contactPhone       String?  @map("contact_phone")
-  contactEmail       String?  @map("contact_email")
-  contactWhatsapp    String?  @map("contact_whatsapp")
-  featuresList       Json     @default("[]") @map("features_list")
+  enterpriseFeatures String[] @map("enterprise_features")
+  contactPhone       String   @default("+62 812-1234-5678") @map("contact_phone")
+  contactEmail       String   @default("hello@rentalps.com") @map("contact_email")
+  contactWhatsapp    String   @default("+6281212345678") @map("contact_whatsapp")
+  featuresList       String[] @map("features_list")
   isActive           Boolean  @default(true) @map("is_active")
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 
-  @@map("landing_page_config")
+  @@map("landing_page_configs")
+}
+
+// 🔥 NEW: Comprehensive Audit Logs
+enum AuditEventType {
+  // Authentication Events
+  LOGIN_ATTEMPT
+  LOGIN_SUCCESS
+  LOGIN_FAILED
+  LOGOUT
+  PASSWORD_RESET_REQUEST
+  PASSWORD_RESET_SUCCESS
+  ACCOUNT_LOCKED
+  ACCOUNT_UNLOCKED
+  SESSION_EXPIRED
+
+  // User Management Events
+  USER_CREATED
+  USER_UPDATED
+  USER_DELETED
+  USER_ACTIVATED
+  USER_DEACTIVATED
+  USER_ROLE_CHANGED
+  USER_LOCATION_ASSIGNED
+  USER_LOCATION_UNASSIGNED
+
+  // Tenant Management Events
+  TENANT_CREATED
+  TENANT_UPDATED
+  TENANT_ACTIVATED
+  TENANT_DEACTIVATED
+  TENANT_DOMAIN_CHANGED
+
+  // Location Management Events
+  LOCATION_CREATED
+  LOCATION_UPDATED
+  LOCATION_DELETED
+  LOCATION_ACTIVATED
+  LOCATION_DEACTIVATED
+
+  // Unit Management Events
+  UNIT_CREATED
+  UNIT_UPDATED
+  UNIT_DELETED
+  UNIT_STATUS_CHANGED
+  UNIT_PRICING_UPDATED
+
+  // Rental Session Events
+  SESSION_STARTED
+  SESSION_EXTENDED
+  SESSION_COMPLETED
+  SESSION_CANCELLED
+  SESSION_POWER_OUTAGE
+
+  // F&B Events
+  FNB_ITEM_CREATED
+  FNB_ITEM_UPDATED
+  FNB_ITEM_DELETED
+  FNB_ORDER_CREATED
+  FNB_ORDER_CANCELLED
+  FNB_STOCK_UPDATED
+
+  // Transaction Events
+  PAYMENT_RECEIVED
+  PAYMENT_FAILED
+  REFUND_ISSUED
+
+  // System Events
+  SYSTEM_BACKUP
+  SYSTEM_MAINTENANCE
+  DATA_EXPORT
+  DATA_IMPORT
+  RATE_LIMIT_TRIGGERED
+  SECURITY_VIOLATION
+
+  // Customer Page Events
+  CUSTOMER_PAGE_VIEWED
+  CUSTOMER_PAGE_CONFIG_UPDATED
+
+  // API Events
+  API_ACCESS
+  API_RATE_LIMITED
+  API_ERROR
+
+  @@map("AuditEventType")
+}
+
+enum AuditSeverity {
+  LOW // Normal operations
+  MEDIUM // Important changes
+  HIGH // Security events
+  CRITICAL // System failures, security violations
+
+  @@map("AuditSeverity")
+}
+
+model AuditLog {
+  id String @id @default(cuid())
+
+  // Event Information
+  eventType    AuditEventType @map("event_type")
+  severity     AuditSeverity  @default(LOW)
+  success      Boolean        @default(true)
+  errorMessage String?        @map("error_message")
+
+  // User & Context Information
+  userId     String?   @map("user_id")
+  email      String? // Can be null for anonymous actions
+  userRole   UserRole? @map("user_role")
+  tenantId   String?   @map("tenant_id")
+  locationId String?   @map("location_id")
+
+  // Request Information
+  ipAddress     String  @map("ip_address")
+  userAgent     String? @map("user_agent")
+  subdomain     String?
+  requestPath   String? @map("request_path")
+  requestMethod String? @map("request_method")
+
+  // Rate Limiting Information
+  rateLimitInfo Json? @map("rate_limit_info")
+
+  // Additional Context
+  resourceType String? @map("resource_type") // 'unit', 'user', 'session', etc.
+  resourceId   String? @map("resource_id") // ID of affected resource
+  oldValues    Json?   @map("old_values") // Before change
+  newValues    Json?   @map("new_values") // After change
+  metadata     Json? // Additional event-specific data
+
+  // Performance & Monitoring
+  responseTime Int? @map("response_time") // Response time in ms
+
+  // Timestamps
+  timestamp DateTime @default(now())
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user     User?     @relation(fields: [userId], references: [id])
+  tenant   Tenant?   @relation(fields: [tenantId], references: [id])
+  location Location? @relation(fields: [locationId], references: [id])
+
+  // Indexes for performance
+  @@index([eventType])
+  @@index([userId])
+  @@index([tenantId])
+  @@index([locationId])
+  @@index([timestamp])
+  @@index([ipAddress])
+  @@index([severity])
+  @@index([success])
+  @@index([eventType, timestamp])
+  @@index([userId, timestamp])
+  @@index([tenantId, timestamp])
+  @@map("audit_logs")
 }
