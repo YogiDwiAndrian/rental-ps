@@ -78,29 +78,8 @@ export function useWhatsAppContacts(subdomain: string, locationId?: string) {
       console.log(`📞 [${new Date().toLocaleTimeString()}] Contacts API response:`, data)
       
       if (data.success && data.data && data.data.contacts) {
-        // FIXED: Don't filter by location for now to ensure all contacts are shown
-        // The API should handle location filtering properly, but for demo we want all contacts
-        let filteredContacts = data.data.contacts
-        
-        console.log(`📞 Raw contacts from API: ${data.data.contacts.length}`)
-        
-        // Only apply location filtering if we have multiple locations AND locationId is specified
-        // For single location or global access, show all contacts
-        if (locationId && data.data.contacts.length > 3) { // Only filter if we have many contacts
-          const beforeFilter = filteredContacts.length
-          filteredContacts = data.data.contacts.filter(contact => 
-            // Include global contacts (no locationName) and location-specific contacts
-            !contact.locationName || contact.locationName === locationId
-          )
-          console.log(`📞 Filtered contacts: ${beforeFilter} -> ${filteredContacts.length} for locationId: ${locationId}`)
-        } else {
-          console.log(`📞 No location filtering applied - showing all ${filteredContacts.length} contacts`)
-        }
-        
-        console.log(`✅ Successfully loaded ${filteredContacts.length} contacts`)
-        console.log(`📊 Contact roles:`, filteredContacts.map(c => `${c.name} (${c.role})`))
-        
-        setContacts(filteredContacts)
+        console.log(`📞 Using all contacts from API: ${data.data.contacts.length} contacts`)
+        setContacts(data.data.contacts)
         setRetryCount(0) // Reset retry count on success
       } else {
         console.warn('⚠️ Unexpected contacts API response structure:', data)

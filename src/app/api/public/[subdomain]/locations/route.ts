@@ -12,8 +12,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { subdomain } = await params
 
-    console.log(`🔍 Locations API called for subdomain: ${subdomain}`)
-
     // Validate subdomain
     if (!subdomain || subdomain.length < 2) {
       console.error('❌ Invalid subdomain:', subdomain)
@@ -84,8 +82,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       )
     }
 
-    console.log(`✅ Found tenant: ${tenant.name} with ${tenant.locations.length} locations`)
-
     // Transform locations data with proper type safety
     const locationsData = tenant.locations.map(location => {
       // Parse operational hours safely
@@ -123,8 +119,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       }
     })
 
-    console.log(`📍 Processed ${locationsData.length} locations:`, locationsData.map(l => l.name))
-
     const responseData = {
       success: true,
       data: {
@@ -139,8 +133,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         lastUpdated: new Date().toISOString()
       }
     }
-
-    console.log(`✅ Returning response with ${locationsData.length} locations`)
 
     const response = NextResponse.json(responseData)
 

@@ -1,11 +1,11 @@
-// prisma/seed.ts - Fixed for Current Schema
+// prisma/seed.ts - Complete Enhanced Seed with All Staff WhatsApp Contacts
 import { PrismaClient, UserRole, ContactRole, UnitStatus, BillingType, SessionStatus, PaymentStatus, TransactionType, AuditEventType, AuditSeverity } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 
 const prisma = new PrismaClient()
 
 async function main() {
-  console.log('🌱 Starting enhanced database seeding...')
+  console.log('🌱 Starting complete enhanced database seeding...')
 
   // 1. Create Super Admin User
   const hashedAdminPassword = await bcrypt.hash('admin123', 12)
@@ -323,19 +323,25 @@ async function main() {
   })
   console.log('✅ Location assignments created')
 
-  // 9. Create WhatsApp Contacts (dengan field yang benar)
+  // 9. Create WhatsApp Contacts - COMPLETE VERSION with ALL STAFF
+  console.log('📞 Creating comprehensive WhatsApp contacts...')
+  
+  // JAKARTA LOCATION CONTACTS
   await prisma.whatsAppContact.createMany({
     data: [
-      // Demo Tenant - Jakarta Location
+      // Demo Owner for Jakarta
       {
         tenantId: demoTenant.id,
         locationId: jakartaLocation.id,
         userId: demoOwner.id,
         name: 'Demo Owner - Jakarta',
-        whatsappNumber: '+6281122334455', // Fixed field name
+        whatsappNumber: '+6281122334455',
         role: ContactRole.owner,
+        isPrimary: true,
+        responseTime: 'Usually replies within 30 minutes',
+        displayOrder: 1,
         isActive: true,
-        availabilitySchedule: { // Fixed field name
+        availabilitySchedule: {
           monday: { start: "10:00", end: "23:00" },
           tuesday: { start: "10:00", end: "23:00" },
           wednesday: { start: "10:00", end: "23:00" },
@@ -345,6 +351,7 @@ async function main() {
           sunday: { start: "09:00", end: "23:00" }
         }
       },
+      // Jakarta Staff (single location)
       {
         tenantId: demoTenant.id,
         locationId: jakartaLocation.id,
@@ -352,6 +359,9 @@ async function main() {
         name: 'Jakarta Staff',
         whatsappNumber: '+6281566778899',
         role: ContactRole.staff,
+        isPrimary: false,
+        responseTime: 'Usually replies within 10 minutes',
+        displayOrder: 2,
         isActive: true,
         availabilitySchedule: {
           monday: { start: "10:00", end: "18:00" },
@@ -363,8 +373,79 @@ async function main() {
           sunday: { start: "18:00", end: "23:00" }
         }
       },
-      
-      // Demo Tenant - Bandung Location
+      // Multi Location Staff 1 - Jakarta assignment
+      {
+        tenantId: demoTenant.id,
+        locationId: jakartaLocation.id,
+        userId: multiLocationStaff1.id,
+        name: 'Multi Location Staff 1 - Jakarta',
+        whatsappNumber: '+6281788990011',
+        role: ContactRole.staff,
+        isPrimary: false,
+        responseTime: 'Usually replies within 15 minutes',
+        displayOrder: 3,
+        isActive: true,
+        availabilitySchedule: {
+          monday: { start: "09:00", end: "17:00" },
+          tuesday: { start: "09:00", end: "17:00" },
+          wednesday: { start: "09:00", end: "17:00" },
+          thursday: { start: "09:00", end: "17:00" },
+          friday: { start: "09:00", end: "17:00" },
+          saturday: { start: "09:00", end: "15:00" },
+          sunday: { start: "12:00", end: "20:00" }
+        }
+      },
+      // All Location Staff - Jakarta assignment
+      {
+        tenantId: demoTenant.id,
+        locationId: jakartaLocation.id,
+        userId: multiLocationStaff2.id,
+        name: 'All Location Staff - Jakarta',
+        whatsappNumber: '+6281899001122',
+        role: ContactRole.staff,
+        isPrimary: false,
+        responseTime: 'Usually replies within 15 minutes',
+        displayOrder: 4,
+        isActive: true,
+        availabilitySchedule: {
+          monday: { start: "14:00", end: "22:00" },
+          tuesday: { start: "14:00", end: "22:00" },
+          wednesday: { start: "14:00", end: "22:00" },
+          thursday: { start: "14:00", end: "22:00" },
+          friday: { start: "14:00", end: "22:00" },
+          saturday: { start: "10:00", end: "18:00" },
+          sunday: { start: "10:00", end: "18:00" }
+        }
+      },
+      // Demo Manager - Jakarta assignment
+      {
+        tenantId: demoTenant.id,
+        locationId: jakartaLocation.id,
+        userId: managerStaff.id,
+        name: 'Demo Manager - Jakarta',
+        whatsappNumber: '+6282011223344',
+        role: ContactRole.manager,
+        isPrimary: false,
+        responseTime: 'Usually replies within 20 minutes',
+        displayOrder: 5,
+        isActive: true,
+        availabilitySchedule: {
+          monday: { start: "08:00", end: "16:00" },
+          tuesday: { start: "08:00", end: "16:00" },
+          wednesday: { start: "08:00", end: "16:00" },
+          thursday: { start: "08:00", end: "16:00" },
+          friday: { start: "08:00", end: "16:00" },
+          saturday: { start: "08:00", end: "12:00" },
+          sunday: { start: "10:00", end: "14:00" }
+        }
+      }
+    ]
+  })
+  
+  // BANDUNG LOCATION CONTACTS
+  await prisma.whatsAppContact.createMany({
+    data: [
+      // Demo Owner for Bandung
       {
         tenantId: demoTenant.id,
         locationId: bandungLocation.id,
@@ -372,6 +453,9 @@ async function main() {
         name: 'Demo Owner - Bandung',
         whatsappNumber: '+6281122334455',
         role: ContactRole.owner,
+        isPrimary: true,
+        responseTime: 'Usually replies within 30 minutes',
+        displayOrder: 1,
         isActive: true,
         availabilitySchedule: {
           monday: { start: "09:00", end: "24:00" },
@@ -383,6 +467,7 @@ async function main() {
           sunday: { start: "08:00", end: "24:00" }
         }
       },
+      // Bandung Staff (single location)
       {
         tenantId: demoTenant.id,
         locationId: bandungLocation.id,
@@ -390,6 +475,9 @@ async function main() {
         name: 'Bandung Staff',
         whatsappNumber: '+6281677889900',
         role: ContactRole.staff,
+        isPrimary: false,
+        responseTime: 'Usually replies within 10 minutes',
+        displayOrder: 2,
         isActive: true,
         availabilitySchedule: {
           monday: { start: "09:00", end: "17:00" },
@@ -401,8 +489,57 @@ async function main() {
           sunday: { start: "17:00", end: "24:00" }
         }
       },
-      
-      // Demo Tenant - Surabaya Location
+      // Multi Location Staff 1 - Bandung assignment
+      {
+        tenantId: demoTenant.id,
+        locationId: bandungLocation.id,
+        userId: multiLocationStaff1.id,
+        name: 'Multi Location Staff 1 - Bandung',
+        whatsappNumber: '+6281788990011',
+        role: ContactRole.staff,
+        isPrimary: false,
+        responseTime: 'Usually replies within 15 minutes',
+        displayOrder: 3,
+        isActive: true,
+        availabilitySchedule: {
+          monday: { start: "17:00", end: "01:00" },
+          tuesday: { start: "17:00", end: "01:00" },
+          wednesday: { start: "17:00", end: "01:00" },
+          thursday: { start: "17:00", end: "01:00" },
+          friday: { start: "17:00", end: "01:00" },
+          saturday: { start: "15:00", end: "24:00" },
+          sunday: { start: "20:00", end: "24:00" }
+        }
+      },
+      // Demo Manager - Bandung assignment
+      {
+        tenantId: demoTenant.id,
+        locationId: bandungLocation.id,
+        userId: managerStaff.id,
+        name: 'Demo Manager - Bandung',
+        whatsappNumber: '+6282011223344',
+        role: ContactRole.manager,
+        isPrimary: false,
+        responseTime: 'Usually replies within 20 minutes',
+        displayOrder: 4,
+        isActive: true,
+        availabilitySchedule: {
+          monday: { start: "16:00", end: "24:00" },
+          tuesday: { start: "16:00", end: "24:00" },
+          wednesday: { start: "16:00", end: "24:00" },
+          thursday: { start: "16:00", end: "24:00" },
+          friday: { start: "16:00", end: "24:00" },
+          saturday: { start: "12:00", end: "20:00" },
+          sunday: { start: "14:00", end: "22:00" }
+        }
+      }
+    ]
+  })
+  
+  // SURABAYA LOCATION CONTACTS
+  await prisma.whatsAppContact.createMany({
+    data: [
+      // Demo Owner for Surabaya
       {
         tenantId: demoTenant.id,
         locationId: surabayaLocation.id,
@@ -410,6 +547,9 @@ async function main() {
         name: 'Demo Owner - Surabaya',
         whatsappNumber: '+6281122334455',
         role: ContactRole.owner,
+        isPrimary: true,
+        responseTime: 'Usually replies within 30 minutes',
+        displayOrder: 1,
         isActive: true,
         availabilitySchedule: {
           monday: { start: "11:00", end: "22:00" },
@@ -421,8 +561,57 @@ async function main() {
           sunday: { start: "10:00", end: "22:00" }
         }
       },
-      
-      // PS Lounge Tenant
+      // All Location Staff - Surabaya assignment
+      {
+        tenantId: demoTenant.id,
+        locationId: surabayaLocation.id,
+        userId: multiLocationStaff2.id,
+        name: 'All Location Staff - Surabaya',
+        whatsappNumber: '+6281899001122',
+        role: ContactRole.staff,
+        isPrimary: false,
+        responseTime: 'Usually replies within 15 minutes',
+        displayOrder: 2,
+        isActive: true,
+        availabilitySchedule: {
+          monday: { start: "11:00", end: "19:00" },
+          tuesday: { start: "11:00", end: "19:00" },
+          wednesday: { start: "11:00", end: "19:00" },
+          thursday: { start: "11:00", end: "19:00" },
+          friday: { start: "11:00", end: "19:00" },
+          saturday: { start: "18:00", end: "24:00" },
+          sunday: { start: "18:00", end: "22:00" }
+        }
+      },
+      // Demo Manager - Surabaya assignment
+      {
+        tenantId: demoTenant.id,
+        locationId: surabayaLocation.id,
+        userId: managerStaff.id,
+        name: 'Demo Manager - Surabaya',
+        whatsappNumber: '+6282011223344',
+        role: ContactRole.manager,
+        isPrimary: false,
+        responseTime: 'Usually replies within 20 minutes',
+        displayOrder: 3,
+        isActive: true,
+        availabilitySchedule: {
+          monday: { start: "19:00", end: "22:00" },
+          tuesday: { start: "19:00", end: "22:00" },
+          wednesday: { start: "19:00", end: "22:00" },
+          thursday: { start: "19:00", end: "22:00" },
+          friday: { start: "19:00", end: "24:00" },
+          saturday: { start: "20:00", end: "24:00" },
+          sunday: { start: "22:00", end: "24:00" }
+        }
+      }
+    ]
+  })
+  
+  // PS LOUNGE CONTACTS
+  await prisma.whatsAppContact.createMany({
+    data: [
+      // PS Lounge Owner
       {
         tenantId: pslTenant.id,
         locationId: pslLocation.id,
@@ -430,6 +619,9 @@ async function main() {
         name: 'PS Lounge Owner',
         whatsappNumber: '+6281233445566',
         role: ContactRole.owner,
+        isPrimary: true,
+        responseTime: 'Usually replies within 15 minutes',
+        displayOrder: 1,
         isActive: true,
         availabilitySchedule: {
           monday: { start: "12:00", end: "24:00" },
@@ -441,6 +633,7 @@ async function main() {
           sunday: { start: "10:00", end: "24:00" }
         }
       },
+      // PS Lounge Staff
       {
         tenantId: pslTenant.id,
         locationId: pslLocation.id,
@@ -448,6 +641,9 @@ async function main() {
         name: 'PS Lounge Staff',
         whatsappNumber: '+6281900112233',
         role: ContactRole.staff,
+        isPrimary: false,
+        responseTime: 'Usually replies within 5 minutes',
+        displayOrder: 2,
         isActive: true,
         availabilitySchedule: {
           monday: { start: "12:00", end: "20:00" },
@@ -461,7 +657,7 @@ async function main() {
       }
     ]
   })
-  console.log('✅ WhatsApp Contacts created')
+  console.log('✅ Complete WhatsApp Contacts created for all locations and staff')
 
   // 10. Create Gaming Units untuk testing (dengan field yang benar)
   await prisma.unit.createMany({
@@ -493,7 +689,7 @@ async function main() {
   // 11. Create F&B Categories dan Items (locationId based)
   const beverageCategory = await prisma.fnbCategory.create({
     data: {
-      locationId: jakartaLocation.id, // Fixed: use locationId instead of tenantId
+      locationId: jakartaLocation.id,
       name: 'Beverages',
       isActive: true,
     }
@@ -565,7 +761,7 @@ async function main() {
       {
         tenantId: demoTenant.id,
         locationId: jakartaLocation.id,
-        showUnitStatus: true, // Fixed field names
+        showUnitStatus: true,
         showFnbMenu: true,
         showContactInfo: true,
         isActive: true,
@@ -654,11 +850,7 @@ async function main() {
   })
   console.log('✅ Landing Page Config created')
 
-  // 14. User Preferences will be created after schema migration
-  // Note: UserPreference model needs to be added to schema first
-  console.log('📝 UserPreference model ready for migration')
-
-  // 15. Create Initial Audit Logs
+  // 14. Create Initial Audit Logs
   await prisma.auditLog.createMany({
     data: [
       {
@@ -666,28 +858,29 @@ async function main() {
         severity: AuditSeverity.MEDIUM,
         success: true,
         ipAddress: '127.0.0.1',
-        userAgent: 'Database Seeder v2.0',
+        userAgent: 'Database Seeder v3.0 - Complete Enhanced',
         subdomain: null,
-        requestPath: '/database/enhanced-seed',
+        requestPath: '/database/complete-enhanced-seed',
         requestMethod: 'POST',
         resourceType: 'database',
-        resourceId: 'enhanced_seed_v2',
+        resourceId: 'complete_enhanced_seed_v3',
         metadata: {
-          operation: 'enhanced_database_seeding',
+          operation: 'complete_enhanced_database_seeding',
           tables_created: [
             'users', 'tenants', 'locations', 'location_assignments', 
             'units', 'fnb_categories', 'fnb_items', 'whatsapp_contacts',
-            'customer_page_configs', 'landing_page_config', 'user_preferences',
-            'audit_logs'
+            'customer_page_configs', 'landing_page_config', 'audit_logs'
           ],
           environment: 'development',
-          seed_version: '2.0',
+          seed_version: '3.0',
+          whatsapp_contacts_strategy: 'complete_multi_location_coverage',
           test_scenarios: [
             'single_location_staff',
-            'multi_location_staff', 
+            'multi_location_staff_complete_contacts', 
             'owner_location_assignments',
-            'floating_whatsapp_contacts',
-            'location_selector_testing'
+            'floating_whatsapp_comprehensive_contacts',
+            'location_selector_testing',
+            'multi_shift_staff_coverage'
           ]
         },
         responseTime: 0,
@@ -701,7 +894,7 @@ async function main() {
         email: superAdmin.email,
         userRole: UserRole.super_admin,
         ipAddress: '127.0.0.1',
-        userAgent: 'Database Seeder v2.0',
+        userAgent: 'Database Seeder v3.0 - Complete Enhanced',
         resourceType: 'user',
         resourceId: superAdmin.id,
         newValues: {
@@ -710,9 +903,9 @@ async function main() {
           name: superAdmin.name
         },
         metadata: {
-          created_during: 'enhanced_database_seeding',
+          created_during: 'complete_enhanced_database_seeding',
           user_type: 'super_admin',
-          seed_version: '2.0'
+          seed_version: '3.0'
         },
         responseTime: 0,
         timestamp: new Date(),
@@ -721,7 +914,7 @@ async function main() {
   })
   console.log('✅ Enhanced Audit Logs created')
 
-  console.log('🎉 Enhanced database seeding completed successfully!')
+  console.log('🎉 Complete Enhanced database seeding completed successfully!')
   console.log('\n📋 Created Data Summary:')
   console.log('- 1 Super Admin user')
   console.log('- 2 Tenants (demo, pslounge)')
@@ -729,10 +922,9 @@ async function main() {
   console.log('- 8 Users (1 super admin, 2 owners, 5 staff with different scenarios)')
   console.log('- 13 Gaming units across all locations')
   console.log('- 5 F&B categories with 14 items')
-  console.log('- 6 WhatsApp contacts with working hours')
+  console.log('- 11 WhatsApp contacts with comprehensive multi-location coverage')
   console.log('- 4 Customer page configs')
   console.log('- 1 Landing page config')
-  console.log('- 3 User preferences (ready after migration)')
   console.log('- 2 Enhanced audit logs')
   
   console.log('\n🔑 Test Credentials:')
@@ -757,17 +949,39 @@ async function main() {
   console.log('✅ Complete F&B inventory system')
   console.log('✅ Customer page configurations')
   
-  console.log('\n📱 FloatingWhatsApp Test Cases:')
-  console.log('- Jakarta: Owner (10:00-23:00) + Staff (10:00-18:00/18:00-01:00)')
-  console.log('- Bandung: Owner (09:00-24:00) + Staff (09:00-17:00/17:00-02:00)')
-  console.log('- Surabaya: Owner only (11:00-22:00)')
-  console.log('- PS Lounge: Owner (12:00-24:00) + Staff (12:00-20:00/20:00-02:00)')
+  console.log('\n📱 Complete FloatingWhatsApp Coverage:')
+  console.log('JAKARTA (5 contacts):')
+  console.log('  - Demo Owner - Jakarta (owner, primary)')
+  console.log('  - Jakarta Staff (staff, single location)')
+  console.log('  - Multi Location Staff 1 - Jakarta (staff, multi location)')
+  console.log('  - All Location Staff - Jakarta (staff, multi location)')
+  console.log('  - Demo Manager - Jakarta (manager, all locations)')
+  console.log('')
+  console.log('BANDUNG (4 contacts):')
+  console.log('  - Demo Owner - Bandung (owner, primary)')
+  console.log('  - Bandung Staff (staff, single location)')
+  console.log('  - Multi Location Staff 1 - Bandung (staff, multi location)')
+  console.log('  - Demo Manager - Bandung (manager, all locations)')
+  console.log('')
+  console.log('SURABAYA (3 contacts):')
+  console.log('  - Demo Owner - Surabaya (owner, primary)')
+  console.log('  - All Location Staff - Surabaya (staff, multi location)')
+  console.log('  - Demo Manager - Surabaya (manager, all locations)')
+  console.log('')
+  console.log('PS LOUNGE (2 contacts):')
+  console.log('  - PS Lounge Owner (owner, primary)')
+  console.log('  - PS Lounge Staff (staff, single location)')
+  
+  console.log('\n🎯 Multi-Location Staff WhatsApp Coverage:')
+  console.log('✅ Multi Location Staff 1: Jakarta (+6281788990011) + Bandung (+6281788990011)')
+  console.log('✅ All Location Staff: Jakarta (+6281899001122) + Surabaya (+6281899001122)')
+  console.log('✅ Demo Manager: Jakarta (+6282011223344) + Bandung (+6282011223344) + Surabaya (+6282011223344)')
   
   console.log('\n🎯 Next Development Steps:')
-  console.log('1. Improve login flow with location selector + preferences')
-  console.log('2. Implement floating WhatsApp system')
-  console.log('3. Enhance location selector UI with quick stats')
-  console.log('4. Add user preference management')
+  console.log('1. Test location selector with multi-location staff')
+  console.log('2. Verify floating WhatsApp shows correct staff for each location')
+  console.log('3. Test staff login flow and location preferences')
+  console.log('4. Implement user preference management system')
 }
 
 main()
@@ -775,7 +989,7 @@ main()
     await prisma.$disconnect()
   })
   .catch(async (e) => {
-    console.error('❌ Error during enhanced seeding:', e)
+    console.error('❌ Error during complete enhanced seeding:', e)
     await prisma.$disconnect()
     process.exit(1)
   })
