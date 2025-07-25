@@ -23,7 +23,7 @@ import { useMobileDetection } from '@/hooks/use-mobile-detection'
 
 interface WhatsAppContact {
   name: string
-  role: 'owner' | 'staff' | 'manager' | 'custom'
+  role: 'owner' | 'staff' 
   number: string
   isOnline?: boolean
   responseTime?: string
@@ -94,7 +94,7 @@ function checkAvailabilityStatus(contact: WhatsAppContact): {
           isAvailable: true,
           status: 'available',
           message: `Online now (until ${todayHours.end})`,
-          priority: contact.role === 'manager' ? 3 : 4
+          priority: 3 
         }
       } else {   
         if (currentTime < startTime) {
@@ -103,7 +103,7 @@ function checkAvailabilityStatus(contact: WhatsAppContact): {
             status: 'offline',
             message: `Available from ${todayHours.start} today`,
             nextAvailable: `${todayHours.start} today`,
-            priority: contact.role === 'manager' ? 7 : 8
+            priority: 5
           }
         }
         
@@ -119,7 +119,7 @@ function checkAvailabilityStatus(contact: WhatsAppContact): {
               status: 'offline',
               message: `Next available: ${checkHours.start} ${dayName}`,
               nextAvailable: `${checkHours.start} ${dayName}`,
-              priority: contact.role === 'manager' ? 7 : 8
+              priority: 6
             }
           }
         }
@@ -132,7 +132,7 @@ function checkAvailabilityStatus(contact: WhatsAppContact): {
       isAvailable: true,
       status: 'available',
       message: contact.currentAvailability || `Usually replies in ${contact.responseTime || '10 minutes'}`,
-      priority: contact.role === 'manager' ? 5 : 6
+      priority: 4
     }
   }
 
@@ -218,8 +218,6 @@ export function FloatingWhatsApp({ contacts, locationName }: FloatingWhatsAppPro
         message += `*Note: I understand you might be busy, but I wanted to reach out as this seemed important.*\n\n`
       }
       message += `Terima kasih! 🎮`
-    } else if (contact.role === 'manager') {
-      message += `Saya ingin bertanya tentang:\n• Ketersediaan unit PlayStation\n• Harga dan paket yang tersedia\n• Fasilitas yang ada\n\nTerima kasih! 🎮`
     } else {
       message += `Apakah ada unit PlayStation yang tersedia sekarang? Atau bisa bantu info tentang:\n• Game yang tersedia\n• Kondisi unit\n• Tips gaming\n\nTerima kasih! 🎮`
     }
@@ -249,8 +247,7 @@ export function FloatingWhatsApp({ contacts, locationName }: FloatingWhatsAppPro
   const offlineContacts = sortedContacts.filter(({ availability }) => !availability.isAvailable)
   
   const availableOwners = availableContacts.filter(({ contact }) => contact.role === 'owner')
-  const availableManagers = availableContacts.filter(({ contact }) => contact.role === 'manager')
-  const availableStaff = availableContacts.filter(({ contact }) => ['staff', 'custom'].includes(contact.role))
+  const availableStaff = availableContacts.filter(({ contact }) => contact.role === 'staff')
 
   const availableCount = availableContacts.length
 
@@ -347,36 +344,11 @@ export function FloatingWhatsApp({ contacts, locationName }: FloatingWhatsAppPro
                     ))}
                   </div>
                 )}
-
-                {/* Management Section */}
-                {availableManagers.length > 0 && (
-                  <div>
-                    {availableStaff.length > 0 && <Separator />}
-                    <div className="bg-blue-50 px-4 py-3 border-b border-blue-100">
-                      <div className="flex items-center gap-2 mb-1">
-                        <UserCog className="w-4 h-4 text-blue-600" />
-                        <span className="text-sm font-bold text-blue-800">💼 Management Team</span>
-                      </div>
-                      <p className="text-xs text-blue-700">For bookings, pricing & operational questions</p>
-                    </div>
-                    
-                    {availableManagers.map(({ contact, availability, roleInfo }, index) => (
-                      <ContactItem
-                        key={`manager-${index}`}
-                        contact={contact}
-                        availability={availability}
-                        roleInfo={roleInfo}
-                        onContact={handleContactWhatsApp}
-                        isMobile={isMobile}
-                      />
-                    ))}
-                  </div>
-                )}
-
+                
                 {/* Owner Section */}
                 {availableOwners.length > 0 && (
                   <div>
-                    {(availableStaff.length > 0 || availableManagers.length > 0) && <Separator />}
+                    {(availableStaff.length > 0) && <Separator />}
                     <div className="bg-gradient-to-r from-yellow-50 to-orange-50 px-4 py-3 border-b border-yellow-100">
                       <div className="flex items-center gap-2 mb-1">
                         <Crown className="w-4 h-4 text-yellow-600" />

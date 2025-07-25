@@ -50,7 +50,7 @@ export default async function DashboardPage({
                 No Location Access
               </h1>
               <p className="text-red-700 mb-6">
-                You are not assigned to any locations. Please contact your manager.
+                You are not assigned to any locations. Please contact your owner.
               </p>
               <a 
                 href="/auth/signout"

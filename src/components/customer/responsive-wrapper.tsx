@@ -27,7 +27,7 @@ interface ResponsiveWrapperProps {
 
 interface WhatsAppContactFormatted {
   name: string
-  role: 'owner' | 'manager' | 'staff' | 'custom'
+  role: 'owner' | 'staff'
   number: string
   isOnline: boolean
   responseTime?: string

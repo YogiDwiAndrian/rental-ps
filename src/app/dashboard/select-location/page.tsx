@@ -54,7 +54,7 @@ export default async function SelectLocationPage() {
           </h1>
           
           <p className="text-red-700 mb-6">
-            You are not assigned to any locations. Please contact your manager to assign you to a location before you can access the dashboard.
+            You are not assigned to any locations. Please contact your owner to assign you to a location before you can access the dashboard.
           </p>
           
           <div className="space-y-3">

@@ -8,7 +8,7 @@ export interface WhatsAppContact {
   id: string
   name: string
   whatsappNumber: string
-  role: 'owner' | 'manager' | 'staff' | 'custom'
+  role: 'owner' | 'staff' 
   isPrimary: boolean
   responseTime?: string
   locationName?: string
@@ -136,8 +136,7 @@ export function useWhatsAppContacts(subdomain: string, locationId?: string) {
   const groupedContacts = {
     primary: contacts.filter(c => c.isPrimary),
     owners: contacts.filter(c => c.role === 'owner'),
-    managers: contacts.filter(c => c.role === 'manager'), 
-    staff: contacts.filter(c => c.role === 'staff' || c.role === 'custom'),
+    staff: contacts.filter(c => c.role === 'staff'),
     online: contacts.filter(c => c.isOnline),
     all: contacts
   }

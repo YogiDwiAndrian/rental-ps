@@ -373,9 +373,7 @@ model Transaction {
 
 enum ContactRole {
   owner
-  manager
   staff
-  custom
 
   @@map("ContactRole")
 }
