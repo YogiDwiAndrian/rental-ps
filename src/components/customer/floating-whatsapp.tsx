@@ -154,14 +154,6 @@ function getRoleInfo(role: string) {
         color: 'bg-gradient-to-r from-yellow-100 to-orange-100 text-yellow-800 border-yellow-200',
         headerBg: 'bg-gradient-to-r from-yellow-500 to-orange-500'
       }
-    case 'manager':
-      return {
-        icon: <UserCog className="w-4 h-4" />,
-        label: 'Manager',
-        description: 'For bookings, pricing & operational questions',
-        color: 'bg-blue-100 text-blue-800 border-blue-200',
-        headerBg: 'bg-blue-500'
-      }
     case 'staff':
       return {
         icon: <Headphones className="w-4 h-4" />,
@@ -412,10 +404,6 @@ export function FloatingWhatsApp({ contacts, locationName }: FloatingWhatsAppPro
                     <div className="flex items-center gap-2">
                       <Headphones className="w-3 h-3 text-green-600 flex-shrink-0" />
                       <span className="text-xs"><strong>Staff:</strong> Unit availability, games, quick help</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <UserCog className="w-3 h-3 text-blue-600 flex-shrink-0" />
-                      <span className="text-xs"><strong>Manager:</strong> Bookings, pricing, facilities</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <Crown className="w-3 h-3 text-yellow-600 flex-shrink-0" />
