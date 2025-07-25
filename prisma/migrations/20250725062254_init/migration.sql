@@ -134,6 +134,23 @@ CREATE TABLE "location_assignments" (
 );
 
 -- CreateTable
+CREATE TABLE "user_preferences" (
+    "id" TEXT NOT NULL,
+    "user_id" TEXT NOT NULL,
+    "preferred_location_id" TEXT,
+    "theme" TEXT NOT NULL DEFAULT 'light',
+    "language" TEXT NOT NULL DEFAULT 'id',
+    "timezone" TEXT NOT NULL DEFAULT 'Asia/Jakarta',
+    "notifications" BOOLEAN NOT NULL DEFAULT true,
+    "defaultDashboard" TEXT NOT NULL DEFAULT 'overview',
+    "settings" JSONB NOT NULL DEFAULT '{}',
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "user_preferences_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "units" (
     "id" TEXT NOT NULL,
     "location_id" TEXT NOT NULL,
@@ -372,6 +389,9 @@ CREATE UNIQUE INDEX "locations_tenant_id_code_key" ON "locations"("tenant_id", "
 CREATE UNIQUE INDEX "location_assignments_user_id_location_id_key" ON "location_assignments"("user_id", "location_id");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "user_preferences_user_id_key" ON "user_preferences"("user_id");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "units_location_id_name_key" ON "units"("location_id", "name");
 
 -- CreateIndex
@@ -433,6 +453,12 @@ ALTER TABLE "location_assignments" ADD CONSTRAINT "location_assignments_user_id_
 
 -- AddForeignKey
 ALTER TABLE "location_assignments" ADD CONSTRAINT "location_assignments_location_id_fkey" FOREIGN KEY ("location_id") REFERENCES "locations"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "user_preferences" ADD CONSTRAINT "user_preferences_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "user_preferences" ADD CONSTRAINT "user_preferences_preferred_location_id_fkey" FOREIGN KEY ("preferred_location_id") REFERENCES "locations"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "units" ADD CONSTRAINT "units_location_id_fkey" FOREIGN KEY ("location_id") REFERENCES "locations"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

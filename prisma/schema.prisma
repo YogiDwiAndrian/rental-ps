@@ -106,6 +106,7 @@ model User {
   locationAssignments LocationAssignment[]
   whatsappContacts    WhatsAppContact[]
   auditLogs           AuditLog[]
+  userPreference      UserPreference?
 
   @@map("users")
 }
@@ -138,6 +139,7 @@ model Location {
   rentalSessions      RentalSession[]
   transactions        Transaction[]
   auditLogs           AuditLog[]
+  userPreferences     UserPreference[]
 
   @@unique([tenantId, code])
   @@map("locations")
@@ -157,6 +159,26 @@ model LocationAssignment {
 
   @@unique([userId, locationId])
   @@map("location_assignments")
+}
+
+model UserPreference {
+  id                  String   @id @default(cuid())
+  userId              String   @unique @map("user_id")
+  preferredLocationId String?  @map("preferred_location_id")
+  theme               String   @default("light") // light, dark, auto
+  language            String   @default("id") // id, en
+  timezone            String   @default("Asia/Jakarta")
+  notifications       Boolean  @default(true)
+  defaultDashboard    String   @default("overview") // overview, units, reports
+  settings            Json     @default("{}")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  preferredLocation Location? @relation(fields: [preferredLocationId], references: [id])
+
+  @@map("user_preferences")
 }
 
 enum UnitStatus {
