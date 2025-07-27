@@ -4,16 +4,22 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { z } from 'zod'
-import { BillingType } from '@prisma/client'
+import { SessionStatus, PaymentStatus } from '@prisma/client'
 
-// Input validation schema
+// ============================================
+// VALIDATION SCHEMA
+// ============================================
+
 const extendSessionSchema = z.object({
-  additionalDuration: z.number().int().min(15, 'Minimum extension is 15 minutes').max(480, 'Maximum extension is 8 hours'),
+  additionalDuration: z.number().min(15, 'Minimum extension is 15 minutes').max(240, 'Maximum extension is 4 hours'),
   paymentMethod: z.enum(['cash', 'card', 'digital_wallet']).default('cash'),
   notes: z.string().optional()
 })
 
-// Response type
+// ============================================
+// TYPES
+// ============================================
+
 interface ExtendSessionResponse {
   success: boolean
   data?: {
@@ -24,49 +30,61 @@ interface ExtendSessionResponse {
     additionalAmount: number
     totalPaid: number
     extensionCount: number
+    additionalDuration: number
   }
   error?: string
   details?: unknown
 }
 
-interface RouteParams {
-  sessionId: string
+// ============================================
+// UTILS
+// ============================================
+
+const calculateExtensionCost = (additionalMinutes: number, hourlyRate: number): number => {
+  return Math.ceil((additionalMinutes / 60) * hourlyRate)
 }
+
+// ============================================
+// POST HANDLER
+// ============================================
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: RouteParams }
+  { params }: { params: Promise<{ sessionId: string }> }
 ): Promise<NextResponse<ExtendSessionResponse>> {
   try {
-    // Authentication check
+    // Resolve params
+    const resolvedParams = await params
+    const { sessionId } = resolvedParams
+    
+    // Check authentication
     const session = await getServerSession(authOptions)
-    if (!session?.user || session.user.role !== 'staff') {
-      return NextResponse.json({
-        success: false,
-        error: 'Only staff can extend rental sessions'
-      }, { status: 401 })
+    if (!session?.user) {
+      return NextResponse.json(
+        { success: false, error: 'Unauthorized' },
+        { status: 401 }
+      )
     }
 
-    // Get location from header
+    // Get location ID from header
     const locationId = request.headers.get('X-Location-ID')
     if (!locationId) {
-      return NextResponse.json({
-        success: false,
-        error: 'Location ID header is required'
-      }, { status: 400 })
+      return NextResponse.json(
+        { success: false, error: 'Location ID is required' },
+        { status: 400 }
+      )
     }
 
-    // Validate input
+    // Parse and validate request body
     const body = await request.json()
     const validatedData = extendSessionSchema.parse(body)
-    const { sessionId } = params
 
-    // Get existing session with all necessary data - using ONLY relations that exist in schema
-    const existingSession = await prisma.rentalSession.findFirst({
+    // Get active rental session with unit details
+    const rentalSession = await prisma.rentalSession.findFirst({
       where: {
         id: sessionId,
         locationId: locationId,
-        status: 'active'
+        status: SessionStatus.active
       },
       include: {
         unit: {
@@ -76,142 +94,141 @@ export async function POST(
             customerDisplayName: true,
             hourlyRate: true
           }
-        },
-        location: {
-          select: {
-            name: true
-          }
         }
       }
     })
 
-    if (!existingSession) {
-      return NextResponse.json({
-        success: false,
-        error: 'Active session not found'
-      }, { status: 404 })
+    if (!rentalSession) {
+      return NextResponse.json(
+        { success: false, error: 'Active session not found' },
+        { status: 404 }
+      )
     }
 
-    // Verify staff has access to this location
-    const locationAccess = await prisma.locationAssignment.findFirst({
-      where: {
-        userId: session.user.id,
-        locationId: locationId,
-        isActive: true
+    // Verify user has access to this location
+    if (session.user.role !== 'super_admin') {
+      const hasAccess = await prisma.locationAssignment.findFirst({
+        where: {
+          userId: session.user.id,
+          locationId: locationId,
+          isActive: true
+        }
+      })
+
+      if (!hasAccess) {
+        return NextResponse.json(
+          { success: false, error: 'Access denied to this location' },
+          { status: 403 }
+        )
       }
-    })
-
-    if (!locationAccess) {
-      return NextResponse.json({
-        success: false,
-        error: 'Access denied to this location'
-      }, { status: 403 })
     }
 
-    // Check if session can be extended based on billing model
-    if (existingSession.billingModel === 'timer') {
-      return NextResponse.json({
-        success: false,
-        error: 'Timer billing sessions cannot be extended. Please stop and start a new session.'
-      }, { status: 400 })
+    // Validate extension for different billing models
+    if (rentalSession.billingModel === 'timer') {
+      return NextResponse.json(
+        { success: false, error: 'Timer sessions cannot be extended. They are billed at the end.' },
+        { status: 400 }
+      )
     }
 
     // Calculate extension cost
-    const hourlyRate = Number(existingSession.unit.hourlyRate)
-    const additionalAmount = Math.ceil((validatedData.additionalDuration / 60) * hourlyRate)
+    const hourlyRate = parseFloat(rentalSession.unit.hourlyRate.toString())
+    const extensionCost = calculateExtensionCost(validatedData.additionalDuration, hourlyRate)
 
-    // Calculate original and new end times
-    let originalEndTime: Date
-    let newEndTime: Date
+    // Calculate times
+    const currentTotalDuration = rentalSession.purchasedDuration + rentalSession.extendedDuration
+    const originalEndTime = new Date(rentalSession.startTime.getTime() + currentTotalDuration * 60 * 1000)
+    const newEndTime = new Date(originalEndTime.getTime() + validatedData.additionalDuration * 60 * 1000)
 
-    if (existingSession.purchasedDuration) {
-      // Calculate based on start time + purchased duration + previous extensions
-      const totalDuration = existingSession.purchasedDuration + existingSession.extendedDuration
-      originalEndTime = new Date(existingSession.startTime.getTime() + totalDuration * 60000)
-      newEndTime = new Date(originalEndTime.getTime() + validatedData.additionalDuration * 60000)
-    } else {
-      // Fallback to current time + extension
-      originalEndTime = new Date()
-      newEndTime = new Date(originalEndTime.getTime() + validatedData.additionalDuration * 60000)
-    }
+    // Calculate extension count (how many times this session has been extended)
+    const currentExtensions = Math.floor(rentalSession.extendedDuration / 30) // Assuming 30min standard extensions
+    const newExtensionCount = currentExtensions + 1
 
-    // Update session in database transaction
+    // Execute database transaction to extend session
     const result = await prisma.$transaction(async (tx) => {
-      // Create transaction record for the extension
+      // Update rental session with extended duration and new total amount
+      const updatedSession = await tx.rentalSession.update({
+        where: { id: sessionId },
+        data: {
+          extendedDuration: { increment: validatedData.additionalDuration },
+          totalAmount: { increment: extensionCost }
+        }
+      })
+
+      // Create extension payment transaction
       await tx.transaction.create({
         data: {
           locationId: locationId,
           rentalSessionId: sessionId,
           type: 'extension',
-          amount: additionalAmount,
-          paymentStatus: 'paid',
+          amount: extensionCost,
+          paymentStatus: PaymentStatus.paid,
           paymentMethod: validatedData.paymentMethod,
-          description: `Extended ${validatedData.additionalDuration} minutes`
+          description: `${validatedData.additionalDuration} minute extension`
         }
       })
 
-      // Update rental session - using ONLY fields that exist in schema
-      const updatedSession = await tx.rentalSession.update({
-        where: { id: sessionId },
-        data: {
-          extendedDuration: {
-            increment: validatedData.additionalDuration
-          },
-          totalAmount: {
-            increment: additionalAmount
-          }
-        },
-        include: {
-          unit: {
-            select: {
-              name: true,
-              customerDisplayName: true
-            }
-          }
+      // Update work session revenue if active
+      const activeWorkSession = await tx.workSession.findFirst({
+        where: {
+          locationId: locationId,
+          status: 'active'
         }
       })
+
+      if (activeWorkSession) {
+        await tx.workSession.update({
+          where: { id: activeWorkSession.id },
+          data: {
+            totalRevenue: { increment: extensionCost }
+          }
+        })
+      }
 
       return updatedSession
     })
-
-    // Count total extensions (simplified for now)
-    const extensionCount = 1 // We can improve this later with proper tracking
-
-    // Calculate total amount paid (including extensions)
-    const totalPaid = Number(result.totalAmount || 0)
 
     // Return success response
     return NextResponse.json({
       success: true,
       data: {
         sessionId: result.id,
-        unitName: result.unit.customerDisplayName || result.unit.name,
+        unitName: rentalSession.unit.customerDisplayName || rentalSession.unit.name,
         originalEndTime: originalEndTime.toISOString(),
         newEndTime: newEndTime.toISOString(),
-        additionalAmount: additionalAmount,
-        totalPaid: totalPaid,
-        extensionCount: extensionCount
+        additionalAmount: extensionCost,
+        totalPaid: parseFloat(result.totalAmount.toString()),
+        extensionCount: newExtensionCount,
+        additionalDuration: validatedData.additionalDuration
       }
-    }, { status: 200 })
+    })
 
   } catch (error) {
-    console.error('Error extending rental session:', error)
-
+    console.error('Error extending session:', error)
+    
+    // Handle validation errors
     if (error instanceof z.ZodError) {
-      return NextResponse.json({
-        success: false,
-        error: 'Validation error',
-        details: error.issues.map(issue => ({
-          field: issue.path.join('.'),
-          message: issue.message
-        }))
-      }, { status: 400 })
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Invalid input data',
+          details: error.issues.map(issue => ({
+            field: issue.path.join('.'),
+            message: issue.message
+          }))
+        },
+        { status: 400 }
+      )
     }
 
-    return NextResponse.json({
-      success: false,
-      error: 'Internal server error',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    }, { status: 500 })
+    // Handle other errors
+    return NextResponse.json(
+      { 
+        success: false, 
+        error: 'Failed to extend session',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
+      { status: 500 }
+    )
   }
 }
