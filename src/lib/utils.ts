@@ -1,6 +1,7 @@
-// src/lib/utils.ts - Add formatCurrency function
+// src/lib/utils.ts - Updated with Decimal support
 import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
+import { Decimal } from "@prisma/client/runtime/library"
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -8,16 +9,31 @@ export function cn(...inputs: ClassValue[]) {
 
 /**
  * Format number as Indonesian Rupiah currency
- * @param amount - Number to format
+ * @param amount - Number, string, or Decimal to format
  * @returns Formatted currency string (e.g., "Rp 15,000")
  */
-export function formatCurrency(amount: number): string {
+export function formatCurrency(amount: number | string | Decimal): string {
+  // Convert Decimal or string to number
+  const numericAmount = typeof amount === 'number' 
+    ? amount 
+    : Number(amount.toString())
+  
   return new Intl.NumberFormat('id-ID', {
     style: 'currency',
     currency: 'IDR',
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  }).format(amount)
+  }).format(numericAmount)
+}
+
+/**
+ * Convert Prisma Decimal to number safely
+ * @param decimal - Prisma Decimal value
+ * @returns Number value
+ */
+export function decimalToNumber(decimal: Decimal | number | string): number {
+  if (typeof decimal === 'number') return decimal
+  return Number(decimal.toString())
 }
 
 /**

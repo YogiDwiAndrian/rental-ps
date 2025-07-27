@@ -1,4 +1,4 @@
-// src/app/dashboard/location/[locationId]/page.tsx - Production Location Dashboard
+// src/app/dashboard/location/[locationId]/page.tsx - FIXED VERSION
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { redirect } from 'next/navigation'
@@ -26,14 +26,91 @@ import {
   StopCircle,
   Coffee,
   AlertTriangle,
-  CheckCircle2
+  CheckCircle2,
+  TrendingUp,
+  Calendar,
+  Target
 } from 'lucide-react'
-import { formatCurrency } from '@/lib/utils'
-import { calculateWorkSessionDuration, formatWorkSessionDuration } from '@/lib/work-session-utils'
+import { formatCurrency, decimalToNumber } from '@/lib/utils'
+import { 
+  calculateWorkSessionDuration, 
+  formatWorkSessionDuration,
+  calculateWorkSessionSummary,
+  getPerformanceScoreColor,
+  getPerformanceScoreLabel,
+  getShiftStatusMessage
+} from '@/lib/work-session-utils'
+import { WorkSession, WorkSessionStatus } from '@prisma/client'
 
 interface LocationDashboardPageProps {
   params: Promise<{
     locationId: string
+  }>
+}
+
+// Enhanced types for better type safety
+interface EnhancedWorkSession extends WorkSession {
+  user: {
+    id: string
+    name: string | null
+    email: string
+  }
+  location: {
+    id: string
+    name: string
+    code: string
+  }
+}
+
+interface LocationWithRelations {
+  id: string
+  name: string
+  code: string
+  address: string | null
+  phone: string | null
+  email: string | null
+  tenant: {
+    id: string
+    name: string
+    subdomain: string
+  }
+  units: Array<{
+    id: string
+    name: string
+    consoleType: string
+    controllerCount: number
+    status: string
+    hourlyRate: import('@prisma/client/runtime/library').Decimal
+    customerDisplayName: string | null
+    rentalSessions: Array<{
+      id: string
+      startTime: Date
+      endTime: Date | null
+      billingModel: string
+      status: string
+      totalAmount: import('@prisma/client/runtime/library').Decimal
+    }>
+  }>
+  fnbItems: Array<{
+    id: string
+    name: string
+    sellingPrice: import('@prisma/client/runtime/library').Decimal
+    stockQuantity: number
+    minStockAlert: number
+    isActive: boolean
+    category: {
+      id: string
+      name: string
+    } | null
+  }>
+  locationAssignments: Array<{
+    user: {
+      id: string
+      name: string | null
+      email: string
+      role: string
+      isActive: boolean
+    }
   }>
 }
 
@@ -55,7 +132,7 @@ export default async function LocationDashboardPage({ params }: LocationDashboar
     }
   }
   
-  // Fetch location data with related information
+  // Fetch location data with proper typing
   const location = await prisma.location.findUnique({
     where: { id: locationId },
     include: {
@@ -106,59 +183,89 @@ export default async function LocationDashboardPage({ params }: LocationDashboar
         }
       }
     }
-  })
+  }) as LocationWithRelations | null
+
+  if (!location) {
+    redirect('/dashboard/select-location')
+  }
   
-  // Fetch current shift for logged-in staff
-  let currentShift = null
+  // Fetch current work session for logged-in staff with proper typing
+  let currentWorkSession: EnhancedWorkSession | null = null
   if (user.role === 'staff') {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const tomorrow = new Date(today)
-    tomorrow.setDate(tomorrow.getDate() + 1)
-    
-    currentShift = await prisma.workShift.findFirst({
+    currentWorkSession = await prisma.workSession.findFirst({
       where: {
         userId: user.id,
         locationId: locationId,
-        scheduledStartTime: {
-          gte: today,
-          lt: tomorrow
+        status: 'active' as WorkSessionStatus
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
         },
-        status: {
-          in: ['active', 'on_break']
+        location: {
+          select: {
+            id: true,
+            name: true,
+            code: true
+          }
         }
       },
       orderBy: {
-        scheduledStartTime: 'desc'
+        startTime: 'desc'
       }
-    })
+    }) as EnhancedWorkSession | null
   }
   
-  // Calculate dashboard stats
-  const units = location?.units || []
+  // Calculate dashboard stats with proper type conversion
+  const units = location.units || []
   const activeUnits = units.filter(u => u.status === 'available')
   const occupiedUnits = units.filter(u => u.status === 'occupied')
   const maintenanceUnits = units.filter(u => u.status === 'maintenance')
   const brokenUnits = units.filter(u => u.status === 'broken')
   
   const activeSessions = units.flatMap(u => u.rentalSessions).length
-  const activeStaff = location?.locationAssignments?.filter(a => a.user.isActive).length || 0
+  const activeStaff = location.locationAssignments?.filter(a => a.user.isActive).length || 0
   
-  // F&B stats
-  const fnbItems = location?.fnbItems || []
+  // F&B stats with proper type conversion
+  const fnbItems = location.fnbItems || []
   const availableFnbItems = fnbItems.filter(item => item.isActive && item.stockQuantity > 0)
   const lowStockItems = fnbItems.filter(item => item.stockQuantity <= item.minStockAlert)
   
-  // Quick revenue calculation (simplified for MVP)
-  const todayRevenue = activeSessions * 50000 // Simplified calculation
-  
+  // Revenue calculation with proper type conversion
+  const todayRevenue = activeSessions > 0 ? 
+    units.flatMap(u => u.rentalSessions)
+         .reduce((sum, session) => sum + decimalToNumber(session.totalAmount), 0) :
+    0
+
+  // Work session calculations
+  const workSessionSummary = currentWorkSession ? 
+    calculateWorkSessionSummary(
+      currentWorkSession.startTime,
+      currentWorkSession.endTime,
+      currentWorkSession.totalRevenue,
+      currentWorkSession.totalSessions
+    ) : null
+
+  const shiftDuration = currentWorkSession ? 
+    calculateWorkSessionDuration(currentWorkSession.startTime, currentWorkSession.endTime) : 
+    null
+
+  const remainingTime = currentWorkSession ? 
+    calculateWorkSessionDuration(currentWorkSession.startTime, null) : 
+    null
+
   console.log('📊 Location dashboard loaded:', {
     locationId,
     locationName: location.name,
     totalUnits: units.length,
     activeUnits: activeUnits.length,
     activeSessions,
-    userId: user.id
+    userId: user.id,
+    hasWorkSession: !!currentWorkSession
   })
   
   return (
@@ -173,8 +280,8 @@ export default async function LocationDashboardPage({ params }: LocationDashboar
                   <GamepadIcon className="w-5 h-5 text-white" />
                 </div>
                 <div>
-                  <h1 className="text-xl font-bold text-gray-900">{location?.name}</h1>
-                  <p className="text-sm text-gray-500">{location?.code} • {location?.tenant.name}</p>
+                  <h1 className="text-xl font-bold text-gray-900">{location.name}</h1>
+                  <p className="text-sm text-gray-500">{location.code} • {location.tenant.name}</p>
                 </div>
               </div>
               
@@ -238,7 +345,7 @@ export default async function LocationDashboardPage({ params }: LocationDashboar
               <p className="text-xs text-gray-600">sessions running</p>
               <div className="mt-2">
                 <Badge variant="outline" className="text-xs">
-                  {Math.round((activeSessions / units.length) * 100)}% utilization
+                  {Math.round((activeSessions / Math.max(units.length, 1)) * 100)}% utilization
                 </Badge>
               </div>
             </CardContent>
@@ -257,6 +364,7 @@ export default async function LocationDashboardPage({ params }: LocationDashboar
               <p className="text-xs text-gray-600">estimated earnings</p>
               <div className="mt-2">
                 <Badge variant="outline" className="text-xs">
+                  <TrendingUp className="w-3 h-3 mr-1" />
                   +{activeSessions * 5}% vs yesterday
                 </Badge>
               </div>
@@ -359,7 +467,7 @@ export default async function LocationDashboardPage({ params }: LocationDashboar
                       }`} />
                       
                       <div>
-                        <p className="font-medium">{unit.name}</p>
+                        <p className="font-medium">{unit.customerDisplayName || unit.name}</p>
                         <p className="text-sm text-gray-500">{unit.consoleType}</p>
                       </div>
                     </div>
@@ -392,52 +500,51 @@ export default async function LocationDashboardPage({ params }: LocationDashboar
             </CardContent>
           </Card>
 
-          {/* Quick Stats & Alerts */}
+          {/* Work Session Information */}
           <div className="space-y-6">
             
-            {/* Shift Information */}
+            {/* Current Work Session */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
                   <Clock className="w-5 h-5 mr-2" />
-                  Shift Information
+                  Work Session
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Current Staff</span>
-                  <Badge variant="default">
-                    <Users className="w-3 h-3 mr-1" />
-                    {user.name?.split(' ')[0] || 'Staff'}
-                  </Badge>
-                </div>
-                
-                {currentShift ? (
+                {currentWorkSession ? (
                   <>
                     <div className="flex items-center justify-between">
-                      <span className="text-sm">Shift Started</span>
+                      <span className="text-sm">Current Staff</span>
+                      <Badge variant="default">
+                        <Users className="w-3 h-3 mr-1" />
+                        {currentWorkSession.user.name?.split(' ')[0] || 'Staff'}
+                      </Badge>
+                    </div>
+                    
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm">Session Started</span>
                       <span className="text-xs text-gray-900 font-medium">
-                        {new Date(currentShift.actualStartTime || currentShift.scheduledStartTime).toLocaleTimeString('id-ID', {
+                        {currentWorkSession.startTime.toLocaleTimeString('id-ID', {
                           hour: '2-digit',
                           minute: '2-digit'
                         })}
                       </span>
                     </div>
                     
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm">Shift Duration</span>
-                      <span className="text-xs text-gray-900 font-medium">
-                        {shiftDuration.hours}h {shiftDuration.minutes}m
-                      </span>
-                    </div>
+                    {shiftDuration && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm">Duration</span>
+                        <span className="text-xs text-gray-900 font-medium">
+                          {formatWorkSessionDuration(shiftDuration)}
+                        </span>
+                      </div>
+                    )}
                     
                     <div className="flex items-center justify-between">
-                      <span className="text-sm">Shift Ends</span>
-                      <span className="text-xs text-gray-500">
-                        {new Date(currentShift.scheduledEndTime).toLocaleTimeString('id-ID', {
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })} ({remainingTime.hours}h {remainingTime.minutes}m left)
+                      <span className="text-sm">Revenue Today</span>
+                      <span className="text-sm font-bold text-green-600">
+                        {formatCurrency(currentWorkSession.totalRevenue)}
                       </span>
                     </div>
                     
@@ -446,94 +553,46 @@ export default async function LocationDashboardPage({ params }: LocationDashboar
                     <div className="flex items-center justify-between">
                       <span className="text-sm">Sessions Handled</span>
                       <Badge variant="outline">
-                        {currentShift.sessionsHandled || 0} today
+                        {currentWorkSession.totalSessions} today
                       </Badge>
                     </div>
                     
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm">Status</span>
-                      <Badge variant={currentShift.status === 'active' ? 'default' : 'secondary'}>
-                        {currentShift.status === 'on_break' ? (
-                          <>
-                            <PauseCircle className="w-3 h-3 mr-1" />
-                            On Break
-                          </>
-                        ) : (
-                          <>
-                            <CheckCircle2 className="w-3 h-3 mr-1" />
-                            Active
-                          </>
-                        )}
-                      </Badge>
-                    </div>
-                    
-                    {currentShift.totalBreakMinutes > 0 && (
+                    {workSessionSummary && (
                       <div className="flex items-center justify-between">
-                        <span className="text-sm">Break Time</span>
-                        <span className="text-xs text-gray-500">
-                          {Math.floor(currentShift.totalBreakMinutes / 60)}h {currentShift.totalBreakMinutes % 60}m
-                        </span>
+                        <span className="text-sm">Performance</span>
+                        <Badge className={`${getPerformanceScoreColor(workSessionSummary.performanceScore).bg} ${getPerformanceScoreColor(workSessionSummary.performanceScore).text} ${getPerformanceScoreColor(workSessionSummary.performanceScore).border}`}>
+                          <Target className="w-3 h-3 mr-1" />
+                          {getPerformanceScoreLabel(workSessionSummary.performanceScore)}
+                        </Badge>
                       </div>
                     )}
                     
-                    {/* Shift Actions */}
+                    {/* Session Actions */}
                     <div className="pt-2 space-y-2">
-                      {currentShift.status === 'active' ? (
-                        <Button variant="outline" size="sm" className="w-full">
-                          <PauseCircle className="w-3 h-3 mr-2" />
-                          Take Break
-                        </Button>
-                      ) : (
-                        <Button variant="outline" size="sm" className="w-full">
-                          <PlayCircle className="w-3 h-3 mr-2" />
-                          End Break
-                        </Button>
-                      )}
+                      <Button variant="outline" size="sm" className="w-full">
+                        <PauseCircle className="w-3 h-3 mr-2" />
+                        Take Break
+                      </Button>
                       
                       <Button variant="ghost" size="sm" className="w-full text-red-600 hover:text-red-700">
-                        End Shift Early
+                        End Session
                       </Button>
                     </div>
                   </>
                 ) : (
                   <>
                     <div className="text-center py-4">
-                      <p className="text-sm text-gray-500">No active shift found</p>
-                      <p className="text-xs text-gray-400 mt-1">Contact your manager to start shift</p>
+                      <Calendar className="w-12 h-12 text-gray-400 mx-auto mb-2" />
+                      <p className="text-sm text-gray-500">No active work session</p>
+                      <p className="text-xs text-gray-400 mt-1">Start your shift to begin tracking</p>
                     </div>
                     
                     <Button variant="outline" size="sm" className="w-full">
                       <PlayCircle className="w-3 h-3 mr-2" />
-                      Start Shift
+                      Start Work Session
                     </Button>
                   </>
                 )}
-              </CardContent>
-            </Card>                <div className="flex items-center justify-between">
-                  <span className="text-sm">Sessions Handled</span>
-                  <Badge variant="outline">
-                    {activeSessions + Math.floor(Math.random() * 5)} today
-                  </Badge>
-                </div>
-                
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Shift Performance</span>
-                  <Badge variant="default" className="bg-green-500">
-                    <CheckCircle2 className="w-3 h-3 mr-1" />
-                    Excellent
-                  </Badge>
-                </div>
-                
-                {/* Shift Actions */}
-                <div className="pt-2 space-y-2">
-                  <Button variant="outline" size="sm" className="w-full">
-                    <Timer className="w-3 h-3 mr-2" />
-                    Take Break
-                  </Button>
-                  <Button variant="ghost" size="sm" className="w-full text-red-600 hover:text-red-700">
-                    End Shift Early
-                  </Button>
-                </div>
               </CardContent>
             </Card>
 
@@ -541,7 +600,7 @@ export default async function LocationDashboardPage({ params }: LocationDashboar
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <Clock className="w-5 h-5 mr-2" />
+                  <Activity className="w-5 h-5 mr-2" />
                   Recent Activity
                 </CardTitle>
               </CardHeader>
