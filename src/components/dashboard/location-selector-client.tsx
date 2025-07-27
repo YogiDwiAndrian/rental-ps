@@ -1,28 +1,24 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Separator } from '@/components/ui/separator'
 import { 
   MapPin, 
   Building2, 
   Clock, 
-  ArrowRight,
-  User,
   Star,
   History,
-  Settings
+  Settings,
+  Loader2,
+  Check,
+  Users,
+  Shield
 } from 'lucide-react'
-import {
-  getLocationHistory,
-  saveLocationPreference,
-  shouldRememberLocation,
-  setRememberLocationPreference,
-  getLastSelectedLocation,
-  debugPreferences
-} from '@/lib/session-storage'
 
 interface Location {
   id: string
@@ -48,251 +44,275 @@ interface LocationSelectorClientProps {
   locations: Location[]
 }
 
-interface LocationHistoryItem {
-  locationId: string
-  locationName: string
-  locationCode: string
-  lastAccessed: string
-  accessCount: number
-}
-
 export default function LocationSelectorClient({ user, locations }: LocationSelectorClientProps) {
   const router = useRouter()
-  const [rememberChoice, setRememberChoice] = useState(false)
-  const [locationHistory, setLocationHistory] = useState<LocationHistoryItem[]>([])
-  const [loading, setLoading] = useState(false)
+  const [isPending, startTransition] = useTransition()
   const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null)
+  const [rememberChoice, setRememberChoice] = useState(false)
 
-  useEffect(() => {
-    // Load user preferences on mount
-    const remember = shouldRememberLocation(user.id, user.tenantId)
-    setRememberChoice(remember)
+  const showToast = (message: string, type: 'success' | 'error' | 'loading' = 'success') => {
+    // Simple console logging for now
+    // TODO: Replace with proper toast library (sonner recommended)
+    console.log(`${type.toUpperCase()}: ${message}`)
     
-    // Load location history for sorting
-    const history = getLocationHistory(user.id, user.tenantId)
-    setLocationHistory(history)
-    
-    // Check for auto-redirect if remember is enabled
-    const lastLocation = getLastSelectedLocation(user.id, user.tenantId, locations)
-    if (lastLocation && remember) {
-      console.log('🎯 Auto-redirecting to remembered location:', lastLocation.locationName)
-      handleLocationSelect(lastLocation.locationId, false) // Don't save again
+    // Optional: Simple user feedback for critical errors
+    if (type === 'error') {
+      // You can implement a proper toast here later
+      console.error(`Toast Error: ${message}`)
     }
-    
-    // Debug in development
-    if (process.env.NODE_ENV === 'development') {
-      debugPreferences(user.id)
-    }
-  }, [user.id, user.tenantId, locations])
+  }
 
-  const handleLocationSelect = async (locationId: string, savePreference = true) => {
-    setLoading(true)
+  const handleLocationSelect = async (locationId: string) => {
+    if (isPending) return
+    
     setSelectedLocationId(locationId)
-    
     const selectedLocation = locations.find(loc => loc.id === locationId)
+    
     if (!selectedLocation) {
-      setLoading(false)
+      showToast('Location not found', 'error')
       return
     }
     
     try {
-      // Save preference if requested
-      if (savePreference) {
-        saveLocationPreference(user.id, user.tenantId, selectedLocation, rememberChoice)
-        setRememberLocationPreference(user.id, user.tenantId, rememberChoice)
+      console.log('📍 Accessing location dashboard:', selectedLocation.name)
+      
+      // If remember choice is enabled, save preference
+      if (rememberChoice) {
+        const response = await fetch('/api/user/preference', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            preferredLocationId: locationId,
+            rememberChoice: true
+          }),
+        })
+        
+        if (!response.ok) {
+          console.warn('Failed to save preference, but continuing...')
+        } else {
+          showToast('Location preference saved!')
+        }
       }
       
-      console.log('📍 Redirecting to location dashboard:', selectedLocation.name)
-      
-      // Redirect to location dashboard
-      router.push(`/dashboard/location/${locationId}`)
+      // Redirect with smooth transition
+      startTransition(() => {
+        router.push(`/dashboard/location/${locationId}`)
+      })
       
     } catch (error) {
-      console.error('Failed to save location preference:', error)
-      setLoading(false)
+      console.error('Error selecting location:', error)
+      showToast('Failed to access location dashboard', 'error')
+      setSelectedLocationId(null)
     }
-  }
-
-  const getLocationStats = (locationId: string) => {
-    const history = locationHistory.find(loc => loc.locationId === locationId)
-    return {
-      accessCount: history?.accessCount || 0,
-      lastAccessed: history?.lastAccessed ? new Date(history.lastAccessed) : null,
-      isFrequent: (history?.accessCount || 0) >= 3
-    }
-  }
-
-  // Sort locations: frequent first, then alphabetically
-  const sortedLocations = [...locations].sort((a, b) => {
-    const aStats = getLocationStats(a.id)
-    const bStats = getLocationStats(b.id)
-    
-    // Frequent locations first
-    if (aStats.isFrequent && !bStats.isFrequent) return -1
-    if (!aStats.isFrequent && bStats.isFrequent) return 1
-    
-    // Then by access count
-    if (bStats.accessCount !== aStats.accessCount) {
-      return bStats.accessCount - aStats.accessCount
-    }
-    
-    // Finally alphabetically
-    return a.name.localeCompare(b.name)
-  })
-
-  const LocationCard = ({ location }: { location: Location }) => {
-    const stats = getLocationStats(location.id)
-    const isSelected = selectedLocationId === location.id
-    
-    return (
-      <Card 
-        className={`cursor-pointer transition-all duration-200 transform hover:scale-[1.02] hover:shadow-lg
-          ${isSelected ? 'ring-2 ring-blue-500 bg-blue-50' : 'hover:bg-gray-50'}
-        `}
-        onClick={() => handleLocationSelect(location.id)}
-      >
-        <CardContent className="p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div className="p-3 bg-blue-500 rounded-lg">
-                <Building2 className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h3 className="text-xl font-bold text-gray-900">{location.name}</h3>
-                <p className="text-sm text-gray-600 font-medium">{location.code}</p>
-              </div>
-            </div>
-            
-            <div className="flex flex-col items-end gap-2">
-              {stats.isFrequent && (
-                <Badge className="bg-green-100 text-green-800 border-green-200">
-                  <Star className="w-3 h-3 mr-1" />
-                  Frequent
-                </Badge>
-              )}
-              {stats.accessCount > 0 && (
-                <Badge variant="secondary" className="text-xs">
-                  <History className="w-3 h-3 mr-1" />
-                  {stats.accessCount} visits
-                </Badge>
-              )}
-            </div>
-          </div>
-          
-          {stats.lastAccessed && (
-            <div className="flex items-center gap-2 text-sm text-gray-500 mb-4">
-              <Clock className="w-4 h-4" />
-              <span>Last accessed: {stats.lastAccessed.toLocaleDateString()}</span>
-            </div>
-          )}
-          
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-sm text-gray-600">
-              <MapPin className="w-4 h-4" />
-              <span>Location Dashboard</span>
-            </div>
-            
-            <Button 
-              variant={isSelected ? "default" : "outline"}
-              size="sm"
-              disabled={loading}
-              className={isSelected ? "bg-blue-600 hover:bg-blue-700" : ""}
-            >
-              {loading && isSelected ? (
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-              ) : (
-                <>
-                  Select
-                  <ArrowRight className="w-4 h-4 ml-1" />
-                </>
-              )}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    )
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-8">
-      <div className="container mx-auto px-6 max-w-4xl">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 py-8">
+      <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
         
-        {/* Header */}
+        {/* Header Section */}
         <div className="text-center mb-8">
-          <div className="flex items-center justify-center gap-3 mb-4">
-            <div className="p-3 bg-blue-500 rounded-xl">
-              <User className="w-8 h-8 text-white" />
-            </div>
-            <div className="text-left">
-              <h1 className="text-3xl font-bold text-gray-900">
-                Choose Your Location
-              </h1>
-              <p className="text-blue-700">
-                Welcome back, {user.name}
-              </p>
-            </div>
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mb-4">
+            <MapPin className="w-8 h-8 text-blue-600" />
           </div>
           
-          <div className="bg-white/70 rounded-xl p-4 inline-block">
-            <div className="flex items-center gap-2 text-sm text-gray-600">
-              <Building2 className="w-4 h-4" />
-              <span>You have access to {locations.length} location{locations.length > 1 ? 's' : ''}</span>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            Select Your Location
+          </h1>
+          
+          <p className="text-lg text-gray-600 mb-1">
+            Welcome back, <span className="font-semibold">{user.name}</span>
+          </p>
+          
+          <p className="text-sm text-gray-500">
+            Choose your working location to access the dashboard
+          </p>
+        </div>
+
+        {/* User Info Card */}
+        <Card className="mb-6">
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-4">
+                <div className="flex items-center justify-center w-12 h-12 bg-blue-500 rounded-full">
+                  <Users className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-900">{user.email}</p>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="capitalize">
+                      <Shield className="w-3 h-3 mr-1" />
+                      {user.role}
+                    </Badge>
+                    <Badge variant="outline">
+                      {user.tenant?.name || 'Unknown Tenant'}
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="text-right">
+                <p className="text-sm text-gray-500">Available Locations</p>
+                <p className="text-2xl font-bold text-blue-600">{locations.length}</p>
+              </div>
             </div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
 
-        {/* Location Cards */}
-        <div className="grid md:grid-cols-2 gap-6 mb-8">
-          {sortedLocations.map((location) => (
-            <LocationCard key={location.id} location={location} />
-          ))}
-        </div>
-
-        {/* Remember Choice - Simple Toggle */}
-        <Card className="bg-white/80 backdrop-blur-sm">
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Settings className="w-5 h-5" />
-              Preferences
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-start space-x-3">
-              <button
-                onClick={() => setRememberChoice(!rememberChoice)}
-                disabled={loading}
-                className={`
-                  relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent 
-                  transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
-                  ${rememberChoice ? 'bg-blue-600' : 'bg-gray-200'}
-                  ${loading ? 'opacity-50 cursor-not-allowed' : ''}
-                `}
-              >
-                <span
-                  className={`
-                    pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 
-                    transition duration-200 ease-in-out
-                    ${rememberChoice ? 'translate-x-4' : 'translate-x-0'}
-                  `}
-                />
-              </button>
-              <div className="flex-1">
-                <label className="text-sm font-medium text-gray-700 cursor-pointer">
-                  Remember my choice and automatically redirect next time
+        {/* Remember Choice Option */}
+        <Card className="mb-6">
+          <CardContent className="pt-6">
+            <div className="flex items-center space-x-3">
+              <Checkbox
+                id="remember-choice"
+                checked={rememberChoice}
+                onCheckedChange={(checked: boolean) => setRememberChoice(checked)}
+                className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+              />
+              <div className="grid gap-1.5 leading-none">
+                <label
+                  htmlFor="remember-choice"
+                  className="text-sm font-medium leading-none cursor-pointer"
+                >
+                  Remember my choice
                 </label>
-                <p className="text-xs text-gray-500 mt-1">
-                  You can change this preference anytime in your dashboard settings
+                <p className="text-xs text-gray-500">
+                  Skip this selection next time and go directly to your preferred location
                 </p>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Footer Info */}
-        <div className="text-center mt-8">
-          <p className="text-sm text-gray-600">
-            💡 Select your primary working location to access the dashboard
-          </p>
+        {/* Locations Grid */}
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {locations.map((location) => {
+            const isSelected = selectedLocationId === location.id
+            const isLoading = isPending && isSelected
+            
+            return (
+              <Card 
+                key={location.id}
+                className={`cursor-pointer transition-all duration-200 hover:shadow-lg border-2 ${
+                  isSelected 
+                    ? 'border-blue-500 bg-blue-50 shadow-md' 
+                    : 'border-gray-200 hover:border-blue-300'
+                } ${isLoading ? 'opacity-75' : ''}`}
+                onClick={() => !isLoading && handleLocationSelect(location.id)}
+              >
+                <CardHeader className="pb-3">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className={`flex items-center justify-center w-10 h-10 rounded-lg ${
+                        isSelected ? 'bg-blue-500' : 'bg-gray-100'
+                      }`}>
+                        <Building2 className={`w-5 h-5 ${
+                          isSelected ? 'text-white' : 'text-gray-600'
+                        }`} />
+                      </div>
+                      <div>
+                        <CardTitle className="text-lg font-semibold text-gray-900">
+                          {location.name}
+                        </CardTitle>
+                        <p className="text-sm text-gray-500">
+                          Code: {location.code}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    {isSelected && (
+                      <div className="flex items-center justify-center w-6 h-6 bg-green-500 rounded-full">
+                        <Check className="w-4 h-4 text-white" />
+                      </div>
+                    )}
+                  </div>
+                </CardHeader>
+                
+                <CardContent className="pt-0">
+                  <div className="space-y-3">
+                    {/* Quick Stats */}
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="flex items-center text-gray-600">
+                        <Clock className="w-3 h-3 mr-1" />
+                        Active Today
+                      </div>
+                      <div className="flex items-center text-gray-600">
+                        <Users className="w-3 h-3 mr-1" />
+                        Multi-Location
+                      </div>
+                    </div>
+                    
+                    <Separator className="my-2" />
+                    
+                    {/* Action Button */}
+                    <Button 
+                      variant={isSelected ? "default" : "outline"}
+                      className="w-full"
+                      disabled={isLoading}
+                    >
+                      {isLoading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Accessing...
+                        </>
+                      ) : isSelected ? (
+                        <>
+                          <Check className="w-4 h-4 mr-2" />
+                          Selected
+                        </>
+                      ) : (
+                        'Select Location'
+                      )}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          })}
+        </div>
+
+        {/* Footer Information */}
+        <Card className="mt-8">
+          <CardContent className="pt-6">
+            <div className="text-center space-y-2">
+              <div className="flex items-center justify-center space-x-1 text-sm text-gray-500">
+                <Settings className="w-4 h-4" />
+                <span>Your location preference can be changed anytime in settings</span>
+              </div>
+              
+              <div className="flex items-center justify-center space-x-4 text-xs text-gray-400">
+                <span>Secure Authentication</span>
+                <span>•</span>
+                <span>Multi-Location Support</span>
+                <span>•</span>
+                <span>Smart Preferences</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Quick Actions */}
+        <div className="mt-6 flex justify-center space-x-4">
+          <Button 
+            variant="ghost" 
+            size="sm"
+            onClick={() => router.push('/dashboard?select=true')}
+            className="text-gray-600 hover:text-gray-900"
+          >
+            <History className="w-4 h-4 mr-2" />
+            Refresh Options
+          </Button>
+          
+          <Button 
+            variant="ghost" 
+            size="sm"
+            onClick={() => router.push('/auth/signout')}
+            className="text-red-600 hover:text-red-700"
+          >
+            Sign Out
+          </Button>
         </div>
       </div>
     </div>

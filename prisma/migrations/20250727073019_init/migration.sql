@@ -25,6 +25,9 @@ CREATE TYPE "AuditEventType" AS ENUM ('LOGIN_ATTEMPT', 'LOGIN_SUCCESS', 'LOGIN_F
 -- CreateEnum
 CREATE TYPE "AuditSeverity" AS ENUM ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL');
 
+-- CreateEnum
+CREATE TYPE "WorkSessionStatus" AS ENUM ('active', 'completed');
+
 -- CreateTable
 CREATE TABLE "accounts" (
     "id" TEXT NOT NULL,
@@ -148,6 +151,28 @@ CREATE TABLE "user_preferences" (
     "updated_at" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "user_preferences_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "work_sessions" (
+    "id" TEXT NOT NULL,
+    "user_id" TEXT NOT NULL,
+    "location_id" TEXT NOT NULL,
+    "start_time" TIMESTAMP(3) NOT NULL,
+    "end_time" TIMESTAMP(3),
+    "status" "WorkSessionStatus" NOT NULL DEFAULT 'active',
+    "total_revenue" DECIMAL(10,2) NOT NULL DEFAULT 0,
+    "total_sessions" INTEGER NOT NULL DEFAULT 0,
+    "hourly_revenue" DECIMAL(10,2) NOT NULL DEFAULT 0,
+    "package_revenue" DECIMAL(10,2) NOT NULL DEFAULT 0,
+    "pay_later_revenue" DECIMAL(10,2) NOT NULL DEFAULT 0,
+    "start_notes" TEXT,
+    "end_notes" TEXT,
+    "duration_minutes" INTEGER,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "work_sessions_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -392,6 +417,15 @@ CREATE UNIQUE INDEX "location_assignments_user_id_location_id_key" ON "location_
 CREATE UNIQUE INDEX "user_preferences_user_id_key" ON "user_preferences"("user_id");
 
 -- CreateIndex
+CREATE INDEX "work_sessions_user_id_start_time_idx" ON "work_sessions"("user_id", "start_time");
+
+-- CreateIndex
+CREATE INDEX "work_sessions_location_id_start_time_idx" ON "work_sessions"("location_id", "start_time");
+
+-- CreateIndex
+CREATE INDEX "work_sessions_status_idx" ON "work_sessions"("status");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "units_location_id_name_key" ON "units"("location_id", "name");
 
 -- CreateIndex
@@ -459,6 +493,12 @@ ALTER TABLE "user_preferences" ADD CONSTRAINT "user_preferences_user_id_fkey" FO
 
 -- AddForeignKey
 ALTER TABLE "user_preferences" ADD CONSTRAINT "user_preferences_preferred_location_id_fkey" FOREIGN KEY ("preferred_location_id") REFERENCES "locations"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "work_sessions" ADD CONSTRAINT "work_sessions_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "work_sessions" ADD CONSTRAINT "work_sessions_location_id_fkey" FOREIGN KEY ("location_id") REFERENCES "locations"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "units" ADD CONSTRAINT "units_location_id_fkey" FOREIGN KEY ("location_id") REFERENCES "locations"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

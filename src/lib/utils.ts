@@ -1,4 +1,4 @@
-// src/lib/utils.ts - Proper TypeScript typing
+// src/lib/utils.ts - Add formatCurrency function
 import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
 
@@ -6,55 +6,90 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-// Type for values that can be converted to number
-type NumberLike = string | number | bigint | { toString(): string } | { toNumber?(): number }
-
-// Currency formatting dengan "Rp" prefix
-export function formatCurrency(amount: NumberLike): string {
-  let numAmount: number
-  
-  // Handle different types
-  if (typeof amount === 'object' && amount !== null) {
-    // Handle Prisma Decimal which has toNumber method
-    if ('toNumber' in amount && typeof amount.toNumber === 'function') {
-      numAmount = amount.toNumber()
-    } else {
-      numAmount = Number(amount.toString())
-    }
-  } else {
-    numAmount = Number(amount)
-  }
-  
-  // Handle invalid numbers
-  if (isNaN(numAmount)) {
-    return "Rp 0"
-  }
-  
+/**
+ * Format number as Indonesian Rupiah currency
+ * @param amount - Number to format
+ * @returns Formatted currency string (e.g., "Rp 15,000")
+ */
+export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('id-ID', {
     style: 'currency',
     currency: 'IDR',
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  }).format(numAmount)
+  }).format(amount)
 }
 
-// Number formatting tanpa currency symbol
-export function formatNumber(amount: NumberLike): string {
-  let numAmount: number
+/**
+ * Format duration in minutes to human readable format
+ * @param minutes - Duration in minutes
+ * @returns Formatted duration (e.g., "2h 30m")
+ */
+export function formatDuration(minutes: number): string {
+  const hours = Math.floor(minutes / 60)
+  const mins = minutes % 60
   
-  if (typeof amount === 'object' && amount !== null) {
-    if ('toNumber' in amount && typeof amount.toNumber === 'function') {
-      numAmount = amount.toNumber()
-    } else {
-      numAmount = Number(amount.toString())
-    }
-  } else {
-    numAmount = Number(amount)
+  if (hours === 0) {
+    return `${mins}m`
   }
   
-  if (isNaN(numAmount)) {
-    return "0"
+  if (mins === 0) {
+    return `${hours}h`
   }
   
-  return numAmount.toLocaleString('id-ID')
+  return `${hours}h ${mins}m`
+}
+
+/**
+ * Format date to Indonesian locale
+ * @param date - Date to format
+ * @param options - Intl.DateTimeFormatOptions
+ * @returns Formatted date string
+ */
+export function formatDate(
+  date: Date | string, 
+  options: Intl.DateTimeFormatOptions = {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  }
+): string {
+  const dateObj = typeof date === 'string' ? new Date(date) : date
+  return new Intl.DateTimeFormat('id-ID', options).format(dateObj)
+}
+
+/**
+ * Format time to Indonesian locale
+ * @param date - Date to format
+ * @returns Formatted time string (e.g., "14:30")
+ */
+export function formatTime(date: Date | string): string {
+  const dateObj = typeof date === 'string' ? new Date(date) : date
+  return new Intl.DateTimeFormat('id-ID', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).format(dateObj)
+}
+
+/**
+ * Calculate percentage
+ * @param value - Current value
+ * @param total - Total value
+ * @returns Percentage as number
+ */
+export function calculatePercentage(value: number, total: number): number {
+  if (total === 0) return 0
+  return Math.round((value / total) * 100)
+}
+
+/**
+ * Truncate text with ellipsis
+ * @param text - Text to truncate
+ * @param maxLength - Maximum length
+ * @returns Truncated text
+ */
+export function truncateText(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text
+  return text.substring(0, maxLength) + '...'
 }
