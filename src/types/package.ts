@@ -55,3 +55,7 @@ export interface PackageSelection {
   duration: number
   price: number
 }
+
+// Utility functions are now in session-utils.ts
+// Re-export for convenience
+export type { PackageRate as default }

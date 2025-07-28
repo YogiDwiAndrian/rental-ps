@@ -187,6 +187,7 @@ CREATE TABLE "units" (
     "customer_display_name" TEXT,
     "specifications" JSONB,
     "package_rates" JSONB,
+    "hourly_options" JSONB,
     "show_on_customer_page" BOOLEAN NOT NULL DEFAULT true,
     "is_active" BOOLEAN NOT NULL DEFAULT true,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,

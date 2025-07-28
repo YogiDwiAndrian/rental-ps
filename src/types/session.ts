@@ -2,16 +2,16 @@
 import { BillingType } from '@prisma/client'
 
 // ============================================
-// SESSION TYPES
+// SESSION TYPES (Standardized)
 // ============================================
 
 export interface ActiveSession {
   id: string
   unitId: string
   unitName: string
-  billingModel: BillingType
-  startTime: Date
-  estimatedEndTime?: Date
+  billingModel: 'timer' | 'hourly' | 'package'
+  startTime: string // ISO string for API compatibility
+  estimatedEndTime?: string // ISO string for API compatibility
   remainingMinutes?: number
   totalAmount?: number
   isOvertime: boolean
@@ -31,7 +31,7 @@ export interface StartSessionResponse {
   data?: {
     sessionId: string
     unitName: string
-    billingModel: BillingType
+    billingModel: 'timer' | 'hourly' | 'package'
     startTime: string
     purchasedDuration?: number
     totalAmount?: number
@@ -102,7 +102,7 @@ export interface SessionCalculation {
 }
 
 // ============================================
-// UNIT TYPES
+// UNIT TYPES (Standardized)
 // ============================================
 
 export interface Unit {
@@ -114,6 +114,18 @@ export interface Unit {
   hourlyRate: number
   customerDisplayName?: string
   packages?: PackageRate[]
+  // For customer page compatibility
+  remainingMinutes?: number
+  specifications?: {
+    packageRates?: Record<string, number>
+    games?: string[]
+    storage?: string
+    resolution?: string
+    features?: string[]
+    accessories?: string[]
+    [key: string]: unknown
+  }
+  locationName?: string
 }
 
 export interface UnitStatus {
@@ -171,7 +183,7 @@ export interface PackageManagementResponse {
 }
 
 // ============================================
-// API RESPONSE TYPES
+// API RESPONSE TYPES (Standardized)
 // ============================================
 
 export interface ApiResponse<T = unknown> {
@@ -188,11 +200,11 @@ export interface ActiveSessionsResponse {
     sessionId: string
     unitId: string
     unitName: string
-    billingModel: BillingType
+    billingModel: 'timer' | 'hourly' | 'package'
     startTime: string
     estimatedEndTime?: string
     remainingMinutes?: number
-    totalAmount: number
+    totalAmount?: number
     isOvertime: boolean
   }>
   error?: string
@@ -231,7 +243,7 @@ export interface UseSessionManagementReturn {
   refreshSessions: () => Promise<void>
   
   // Utils
-  calculateSessionDuration: (startTime: Date, endTime?: Date) => SessionCalculation
+  calculateSessionDuration: (startTime: string, endTime?: string) => SessionCalculation
   formatSessionDuration: (minutes: number) => string
   getSessionStatus: (session: ActiveSession) => 'normal' | 'warning' | 'overtime'
 }
@@ -290,21 +302,25 @@ export interface StartSessionDialogProps {
   onOpenChange: (open: boolean) => void
   units: Unit[]
   selectedUnit?: Unit
-  onStartSession: (request: StartSessionRequest) => Promise<void>
+  locationId: string
+  onSuccess?: () => void
 }
 
 export interface ExtendSessionDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   session?: ActiveSession
-  onExtendSession: (sessionId: string, request: ExtendSessionRequest) => Promise<void>
+  locationId: string
+  hourlyRate: number
+  onSuccess?: () => void
 }
 
 export interface StopSessionDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   session?: ActiveSession
-  onStopSession: (sessionId: string, request: StopSessionRequest) => Promise<void>
+  locationId: string
+  onSuccess?: () => void
 }
 
 // ============================================

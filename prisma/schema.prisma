@@ -407,6 +407,7 @@ model Unit {
   customerDisplayName String?    @map("customer_display_name")
   specifications      Json?
   packageRates        Json?      @map("package_rates")
+  hourlyOptions       Json?      @map("hourly_options")
   showOnCustomerPage  Boolean    @default(true) @map("show_on_customer_page")
   isActive            Boolean    @default(true) @map("is_active")
   createdAt           DateTime   @default(now()) @map("created_at")
