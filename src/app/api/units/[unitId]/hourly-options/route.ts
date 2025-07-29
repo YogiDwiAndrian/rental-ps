@@ -40,15 +40,15 @@ interface HourlyOptionsResponse {
 function validateHourlyOptionsArray(hourlyOptions: unknown): hourlyOptions is HourlyOption[] {
   if (!Array.isArray(hourlyOptions)) return false
   
-  return hourlyOptions.every(option => 
+  return hourlyOptions.every((option: unknown) => 
     typeof option === 'object' &&
     option !== null &&
-    typeof option.id === 'string' &&
-    typeof option.duration === 'number' &&
-    typeof option.price === 'number' &&
-    typeof option.label === 'string' &&
-    typeof option.displayOrder === 'number' &&
-    typeof option.isActive === 'boolean'
+    typeof (option as HourlyOption).id === 'string' &&
+    typeof (option as HourlyOption).duration === 'number' &&
+    typeof (option as HourlyOption).price === 'number' &&
+    typeof (option as HourlyOption).label === 'string' &&
+    typeof (option as HourlyOption).displayOrder === 'number' &&
+    typeof (option as HourlyOption).isActive === 'boolean'
   )
 }
 
@@ -65,7 +65,7 @@ function jsonToHourlyOptions(jsonData: unknown): HourlyOption[] {
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: RouteParams }
+  context: { params: Promise<RouteParams> }
 ): Promise<NextResponse<HourlyOptionsResponse>> {
   try {
     // Check authentication
@@ -77,7 +77,8 @@ export async function GET(
       )
     }
 
-    const { unitId } = params
+    // Await params to resolve the Promise
+    const { unitId } = await context.params
 
     // Get unit with hourly options
     const unit = await prisma.unit.findFirst({
@@ -141,8 +142,8 @@ export async function GET(
       success: true,
       data: {
         hourlyOptions: hourlyOptions
-          .filter(option => option.isActive)
-          .sort((a, b) => a.displayOrder - b.displayOrder),
+          .filter((option: HourlyOption) => option.isActive)
+          .sort((a: HourlyOption, b: HourlyOption) => a.displayOrder - b.displayOrder),
         unitId: unit.id,
         unitName: unit.customerDisplayName || unit.name
       }

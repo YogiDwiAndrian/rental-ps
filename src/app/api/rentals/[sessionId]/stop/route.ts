@@ -1,4 +1,4 @@
-// src/app/api/rentals/[sessionId]/stop/route.ts
+// src/app/api/rentals/[sessionId]/stop/route.ts - FIXED VERSION
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
@@ -12,8 +12,8 @@ import { SessionStatus, UnitStatus, PaymentStatus } from '@prisma/client'
 
 const stopSessionSchema = z.object({
   paymentMethod: z.enum(['cash', 'card', 'digital_wallet']).default('cash'),
-  fnbAmount: z.number().min(0).optional(),
-  notes: z.string().optional()
+  fnbAmount: z.number().min(0).default(0),
+  additionalNotes: z.string().optional()
 })
 
 // ============================================
@@ -25,39 +25,14 @@ interface StopSessionResponse {
   data?: {
     sessionId: string
     unitName: string
-    duration: string
-    totalAmount: number
-    paymentMethod: string
-    receipt: {
-      sessionId: string
-      unitName: string
-      startTime: string
-      endTime: string
-      duration: string
-      billingModel: string
-      totalAmount: number
-      paymentMethod: string
-      fnbAmount?: number
-    }
+    totalDuration: number
+    finalAmount: number
+    additionalAmount: number
+    fnbAmount: number
+    endTime: string
   }
   error?: string
   details?: unknown
-}
-
-// ============================================
-// UTILS
-// ============================================
-
-const formatDuration = (startTime: Date, endTime: Date): string => {
-  const durationMs = endTime.getTime() - startTime.getTime()
-  const totalMinutes = Math.floor(durationMs / (1000 * 60))
-  
-  const hours = Math.floor(totalMinutes / 60)
-  const minutes = totalMinutes % 60
-  
-  if (hours === 0) return `${minutes}m`
-  if (minutes === 0) return `${hours}h`
-  return `${hours}h ${minutes}m`
 }
 
 // ============================================
@@ -66,12 +41,11 @@ const formatDuration = (startTime: Date, endTime: Date): string => {
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ sessionId: string }> }
+  context: { params: Promise<{ sessionId: string }> }
 ): Promise<NextResponse<StopSessionResponse>> {
   try {
     // Resolve params
-    const resolvedParams = await params
-    const { sessionId } = resolvedParams
+    const { sessionId } = await context.params
     
     // Check authentication
     const session = await getServerSession(authOptions)
@@ -103,7 +77,15 @@ export async function POST(
         status: SessionStatus.active
       },
       include: {
-        unit: true,
+        unit: {
+          include: {
+            location: {
+              include: {
+                tenant: true
+              }
+            }
+          }
+        },
         transactions: true,
         fnbOrders: {
           include: {
@@ -124,21 +106,32 @@ export async function POST(
       )
     }
 
-    // Verify user has access to this location
+    // Verify user has access to this location - FIXED OWNER PERMISSION
     if (session.user.role !== 'super_admin') {
-      const hasAccess = await prisma.locationAssignment.findFirst({
-        where: {
-          userId: session.user.id,
-          locationId: locationId,
-          isActive: true
+      if (session.user.role === 'owner') {
+        // Owner can access any location in their tenant
+        if (session.user.tenantId !== rentalSession.unit.location.tenant.id) {
+          return NextResponse.json(
+            { success: false, error: 'Access denied to this tenant' },
+            { status: 403 }
+          )
         }
-      })
+      } else if (session.user.role === 'staff') {
+        // Staff must be assigned to the specific location
+        const hasAccess = await prisma.locationAssignment.findFirst({
+          where: {
+            userId: session.user.id,
+            locationId: locationId,
+            isActive: true
+          }
+        })
 
-      if (!hasAccess) {
-        return NextResponse.json(
-          { success: false, error: 'Access denied to this location' },
-          { status: 403 }
-        )
+        if (!hasAccess) {
+          return NextResponse.json(
+            { success: false, error: 'Access denied to this location' },
+            { status: 403 }
+          )
+        }
       }
     }
 
@@ -207,13 +200,13 @@ export async function POST(
             paymentStatus: PaymentStatus.paid,
             paymentMethod: validatedData.paymentMethod,
             description: rentalSession.billingModel === 'timer' 
-              ? 'Timer session final payment'
-              : 'Overtime charges'
+              ? `Timer session: ${durationMinutes} minutes`
+              : `Overtime charges: ${Math.floor(additionalAmount / parseFloat(rentalSession.unit.hourlyRate.toString()) * 60)} minutes`
           }
         })
       }
 
-      // Create F&B transaction if needed
+      // Create F&B payment transaction if there's F&B amount
       if (fnbAmount > 0) {
         await tx.transaction.create({
           data: {
@@ -223,12 +216,12 @@ export async function POST(
             amount: fnbAmount,
             paymentStatus: PaymentStatus.paid,
             paymentMethod: validatedData.paymentMethod,
-            description: 'F&B charges'
+            description: 'F&B orders'
           }
         })
       }
 
-      // Update work session revenue
+      // Update work session revenue if active
       const activeWorkSession = await tx.workSession.findFirst({
         where: {
           locationId: locationId,
@@ -237,12 +230,15 @@ export async function POST(
       })
 
       if (activeWorkSession) {
-        const revenueIncrease = finalAmount - parseFloat(rentalSession.totalAmount.toString())
+        const sessionRevenue = rentalSession.billingModel === 'timer' ? finalAmount - fnbAmount : additionalAmount
+        const revenueField = rentalSession.billingModel === 'package' ? 'packageRevenue' : 
+                           rentalSession.billingModel === 'hourly' ? 'hourlyRevenue' : 'payLaterRevenue'
         
         await tx.workSession.update({
           where: { id: activeWorkSession.id },
           data: {
-            totalRevenue: { increment: revenueIncrease }
+            totalRevenue: { increment: finalAmount },
+            [revenueField]: { increment: sessionRevenue }
           }
         })
       }
@@ -250,20 +246,12 @@ export async function POST(
       return updatedSession
     })
 
-    // Generate receipt data
-    const durationFormatted = formatDuration(rentalSession.startTime, endTime)
-    
-    const receipt = {
-      sessionId: result.id,
-      unitName: rentalSession.unit.customerDisplayName || rentalSession.unit.name,
-      startTime: rentalSession.startTime.toISOString(),
-      endTime: endTime.toISOString(),
-      duration: durationFormatted,
-      billingModel: rentalSession.billingModel,
-      totalAmount: finalAmount,
-      paymentMethod: validatedData.paymentMethod,
-      ...(fnbAmount > 0 && { fnbAmount })
-    }
+    console.log('✅ Session stopped successfully:', {
+      sessionId,
+      duration: durationMinutes,
+      finalAmount,
+      billingModel: rentalSession.billingModel
+    })
 
     // Return success response
     return NextResponse.json({
@@ -271,15 +259,16 @@ export async function POST(
       data: {
         sessionId: result.id,
         unitName: rentalSession.unit.customerDisplayName || rentalSession.unit.name,
-        duration: durationFormatted,
-        totalAmount: finalAmount,
-        paymentMethod: validatedData.paymentMethod,
-        receipt: receipt
+        totalDuration: durationMinutes,
+        finalAmount: finalAmount,
+        additionalAmount: additionalAmount,
+        fnbAmount: fnbAmount,
+        endTime: endTime.toISOString()
       }
     })
 
   } catch (error) {
-    console.error('Error stopping session:', error)
+    console.error('❌ Error stopping session:', error)
     
     // Handle validation errors
     if (error instanceof z.ZodError) {

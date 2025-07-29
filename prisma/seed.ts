@@ -87,20 +87,20 @@ function generatePackageDeals(baseHourlyRate: number) {
     {
       id: 'package_happy_hour',
       name: 'Happy Hour Deal',
-      durationMinutes: 60,
+      duration: 60, // ✅ Correct property name
       price: Math.round(baseHourlyRate * 0.8), // 20% discount
-      description: 'Perfect for quick sessions',
+      description: 'Perfect for quick gaming session',
       isActive: true,
       displayOrder: 1,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     },
     {
-      id: 'package_afternoon_special',
-      name: 'Afternoon Special',
-      durationMinutes: 180,
-      price: Math.round(baseHourlyRate * 2.2), // ~27% discount vs 3x hourly
-      description: 'Best value for afternoon gaming',
+      id: 'package_power_play',
+      name: 'Power Play Package', 
+      duration: 120, // 2 hours
+      price: Math.round(baseHourlyRate * 1.7), // 15% discount vs 2 hourly
+      description: 'Best value for longer gaming',
       isActive: true,
       displayOrder: 2,
       createdAt: new Date().toISOString(),
@@ -108,9 +108,9 @@ function generatePackageDeals(baseHourlyRate: number) {
     },
     {
       id: 'package_marathon',
-      name: 'Marathon Package',
-      durationMinutes: 300,
-      price: Math.round(baseHourlyRate * 3.5), // ~30% discount vs 5x hourly
+      name: 'Marathon Gaming',
+      duration: 180, // 3 hours
+      price: Math.round(baseHourlyRate * 2.4), // 20% discount vs 3 hourly  
       description: 'Ultimate gaming experience',
       isActive: true,
       displayOrder: 3,

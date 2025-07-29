@@ -1,4 +1,4 @@
-// src/app/api/rentals/active/route.ts
+// src/app/api/rentals/active/route.ts - FIXED VERSION
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
@@ -56,19 +56,48 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetActiveS
 
     // Verify user has access to this location
     if (session.user.role !== 'super_admin') {
-      const hasAccess = await prisma.locationAssignment.findFirst({
-        where: {
-          userId: session.user.id,
-          locationId: locationId,
-          isActive: true
-        }
-      })
+      if (session.user.role === 'owner') {
+        // Owner can access any location in their tenant
+        const location = await prisma.location.findFirst({
+          where: {
+            id: locationId,
+            isActive: true
+          },
+          select: {
+            id: true,
+            tenantId: true
+          }
+        })
 
-      if (!hasAccess) {
-        return NextResponse.json(
-          { success: false, error: 'Access denied to this location' },
-          { status: 403 }
-        )
+        if (!location) {
+          return NextResponse.json(
+            { success: false, error: 'Location not found' },
+            { status: 404 }
+          )
+        }
+
+        if (session.user.tenantId !== location.tenantId) {
+          return NextResponse.json(
+            { success: false, error: 'Access denied to this location' },
+            { status: 403 }
+          )
+        }
+      } else if (session.user.role === 'staff') {
+        // Staff must be assigned to the specific location
+        const hasAccess = await prisma.locationAssignment.findFirst({
+          where: {
+            userId: session.user.id,
+            locationId: locationId,
+            isActive: true
+          }
+        })
+
+        if (!hasAccess) {
+          return NextResponse.json(
+            { success: false, error: 'Access denied to this location' },
+            { status: 403 }
+          )
+        }
       }
     }
 

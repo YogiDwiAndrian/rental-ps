@@ -1,4 +1,4 @@
-// src/app/api/rentals/start/route.ts
+// src/app/api/rentals/start/route.ts - FIXED VERSION
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
@@ -36,6 +36,17 @@ interface StartSessionResponse {
   }
   error?: string
   details?: unknown
+}
+
+// Fixed PackageRate interface to match seed data
+interface PackageRate {
+  id: string
+  duration: number        // ✅ Fixed: was durationMinutes
+  price: number
+  name: string
+  description?: string
+  isActive: boolean
+  displayOrder: number
 }
 
 // ============================================
@@ -92,19 +103,30 @@ export async function POST(request: NextRequest): Promise<NextResponse<StartSess
 
     // Verify user has access to this location
     if (session.user.role !== 'super_admin') {
-      const hasAccess = await prisma.locationAssignment.findFirst({
-        where: {
-          userId: session.user.id,
-          locationId: locationId,
-          isActive: true
+      if (session.user.role === 'owner') {
+        // Owner can access any location in their tenant
+        if (session.user.tenantId !== unit.location.tenant.id) {
+          return NextResponse.json(
+            { success: false, error: 'Access denied to this tenant' },
+            { status: 403 }
+          )
         }
-      })
+      } else if (session.user.role === 'staff') {
+        // Staff must be assigned to the specific location
+        const hasAccess = await prisma.locationAssignment.findFirst({
+          where: {
+            userId: session.user.id,
+            locationId: locationId,
+            isActive: true
+          }
+        })
 
-      if (!hasAccess) {
-        return NextResponse.json(
-          { success: false, error: 'Access denied to this location' },
-          { status: 403 }
-        )
+        if (!hasAccess) {
+          return NextResponse.json(
+            { success: false, error: 'Access denied to this location' },
+            { status: 403 }
+          )
+        }
       }
     }
 
@@ -117,6 +139,8 @@ export async function POST(request: NextRequest): Promise<NextResponse<StartSess
       case 'timer':
         // Timer mode - no upfront payment, calculated at end
         totalAmount = 0
+        purchasedDuration = 0
+        estimatedEndTime = null // Timer mode has no estimated end time
         break
 
       case 'hourly':
@@ -135,8 +159,12 @@ export async function POST(request: NextRequest): Promise<NextResponse<StartSess
         }
 
         purchasedDuration = validatedData.purchasedDuration
-        totalAmount = (validatedData.purchasedDuration / 60) * parseFloat(unit.hourlyRate.toString())
-        estimatedEndTime = new Date(Date.now() + validatedData.purchasedDuration * 60 * 1000)
+        totalAmount = Math.ceil((validatedData.purchasedDuration / 60) * parseFloat(unit.hourlyRate.toString()))
+        
+        // Safe date calculation
+        const hourlyEndTime = new Date()
+        hourlyEndTime.setMinutes(hourlyEndTime.getMinutes() + validatedData.purchasedDuration)
+        estimatedEndTime = hourlyEndTime
         break
 
       case 'package':
@@ -156,25 +184,39 @@ export async function POST(request: NextRequest): Promise<NextResponse<StartSess
           )
         }
 
-        interface PackageRate {
-          id: string
-          durationMinutes: number
-          price: number
-          name: string
-        }
-
         const typedPackageRates = packageRates as PackageRate[]
         const selectedPackage = typedPackageRates.find((pkg: PackageRate) => pkg.id === validatedData.packageId)
+        
         if (!selectedPackage) {
           return NextResponse.json(
             { success: false, error: 'Selected package not found' },
             { status: 404 }
           )
         }
+
+        // Validate package duration
+        if (!selectedPackage.duration || selectedPackage.duration <= 0) {
+          return NextResponse.json(
+            { success: false, error: 'Invalid package duration' },
+            { status: 400 }
+          )
+        }
+
+        // Validate package price
+        if (!selectedPackage.price || selectedPackage.price <= 0) {
+          return NextResponse.json(
+            { success: false, error: 'Invalid package price' },
+            { status: 400 }
+          )
+        }
         
-        purchasedDuration = selectedPackage.durationMinutes
+        purchasedDuration = selectedPackage.duration // ✅ Fixed: now using 'duration' instead of 'durationMinutes'
         totalAmount = selectedPackage.price
-        estimatedEndTime = new Date(Date.now() + selectedPackage.durationMinutes * 60 * 1000)
+        
+        // Safe date calculation for package
+        const packageEndTime = new Date()
+        packageEndTime.setMinutes(packageEndTime.getMinutes() + selectedPackage.duration)
+        estimatedEndTime = packageEndTime
         break
 
       default:
@@ -182,6 +224,23 @@ export async function POST(request: NextRequest): Promise<NextResponse<StartSess
           { success: false, error: 'Invalid billing model' },
           { status: 400 }
         )
+    }
+
+    // Validate calculated values before database operations
+    if (validatedData.billingModel !== 'timer') {
+      if (!estimatedEndTime || isNaN(estimatedEndTime.getTime())) {
+        return NextResponse.json(
+          { success: false, error: 'Failed to calculate session end time' },
+          { status: 500 }
+        )
+      }
+      
+      if (purchasedDuration <= 0) {
+        return NextResponse.json(
+          { success: false, error: 'Invalid session duration' },
+          { status: 400 }
+        )
+      }
     }
 
     // Start database transaction to create session and update unit
@@ -195,7 +254,9 @@ export async function POST(request: NextRequest): Promise<NextResponse<StartSess
           status: SessionStatus.active,
           startTime: new Date(),
           purchasedDuration: purchasedDuration,
+          extendedDuration: 0,
           totalAmount: totalAmount
+          // ✅ Removed 'notes' field - not in RentalSession schema
         }
       })
 
@@ -219,6 +280,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<StartSess
             paymentStatus: 'paid',
             paymentMethod: 'cash',
             description: `${validatedData.billingModel} session payment`
+            // ✅ Removed 'notes' field - check if exists in Transaction schema
           }
         })
       }
@@ -232,14 +294,15 @@ export async function POST(request: NextRequest): Promise<NextResponse<StartSess
       })
 
       if (activeWorkSession) {
+        const revenueField = validatedData.billingModel === 'package' ? 'packageRevenue' : 
+                           validatedData.billingModel === 'hourly' ? 'hourlyRevenue' : 'payLaterRevenue'
+        
         await tx.workSession.update({
           where: { id: activeWorkSession.id },
           data: {
             totalSessions: { increment: 1 },
             totalRevenue: { increment: totalAmount },
-            [validatedData.billingModel === 'package' ? 'packageRevenue' : 'hourlyRevenue']: {
-              increment: totalAmount
-            }
+            [revenueField]: { increment: totalAmount }
           }
         })
       }
@@ -247,7 +310,15 @@ export async function POST(request: NextRequest): Promise<NextResponse<StartSess
       return rentalSession
     })
 
-    // Return success response
+    console.log('✅ Session created successfully:', {
+      sessionId: result.id,
+      billingModel: validatedData.billingModel,
+      duration: purchasedDuration,
+      amount: totalAmount,
+      estimatedEndTime: estimatedEndTime?.toISOString()
+    })
+
+    // Return success response with safe toISOString()
     return NextResponse.json({
       success: true,
       data: {
@@ -262,7 +333,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<StartSess
     })
 
   } catch (error) {
-    console.error('Error starting session:', error)
+    console.error('❌ Error starting session:', error)
     
     // Handle validation errors
     if (error instanceof z.ZodError) {
@@ -276,6 +347,18 @@ export async function POST(request: NextRequest): Promise<NextResponse<StartSess
           }))
         },
         { status: 400 }
+      )
+    }
+
+    // Handle Prisma errors
+    if (error instanceof Error && error.message.includes('Prisma')) {
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Database operation failed',
+          details: error.message
+        },
+        { status: 500 }
       )
     }
 

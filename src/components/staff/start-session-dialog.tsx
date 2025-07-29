@@ -68,13 +68,13 @@ interface SessionFormData {
   customerName: string
   purchasedDuration: number
   packageId: string
-  notes: string
+  // ✅ Removed notes field - not in database schema
 }
 
 interface PackageData {
   id: string
   name: string
-  durationMinutes: number
+  duration: number        // ✅ Changed from durationMinutes to duration
   price: number
   description?: string
   displayOrder: number
@@ -135,8 +135,8 @@ export function StartSessionDialog({
     billingModel: 'timer',
     customerName: '',
     purchasedDuration: 60,
-    packageId: '',
-    notes: ''
+    packageId: ''
+    // ✅ Removed notes field
   })
 
   // Get selected unit details
@@ -154,8 +154,8 @@ export function StartSessionDialog({
         billingModel: 'timer',
         customerName: '',
         purchasedDuration: 60,
-        packageId: '',
-        notes: ''
+        packageId: ''
+        // ✅ Removed notes field
       })
       setPackages([])
       setHourlyOptions([])
@@ -197,7 +197,7 @@ export function StartSessionDialog({
         
         // Set default duration to first option if current duration not available
         if (activeOptions.length > 0) {
-          const currentDurationExists = activeOptions.some(option => option.duration === formData.purchasedDuration)
+          const currentDurationExists = activeOptions.some((option: HourlyOptionData) => option.duration === formData.purchasedDuration)
           if (!currentDurationExists) {
             setFormData(prev => ({ ...prev, purchasedDuration: activeOptions[0].duration }))
           }
@@ -268,10 +268,10 @@ export function StartSessionDialog({
         return 0 // Pay at end
       case 'hourly':
         // Use dynamic hourly option price instead of calculating
-        const selectedHourlyOption = hourlyOptions.find(option => option.duration === formData.purchasedDuration)
+        const selectedHourlyOption = hourlyOptions.find((option: HourlyOptionData) => option.duration === formData.purchasedDuration)
         return selectedHourlyOption?.price || ((formData.purchasedDuration / 60) * currentUnit.hourlyRate)
       case 'package':
-        const selectedPackage = packages.find(pkg => pkg.id === formData.packageId)
+        const selectedPackage = packages.find((pkg: PackageData) => pkg.id === formData.packageId)
         return selectedPackage?.price || 0
       default:
         return 0
@@ -284,72 +284,60 @@ export function StartSessionDialog({
         return {
           icon: <Timer className="w-4 h-4" />,
           label: 'Pay at End',
-          description: 'Customer pays after playing, based on actual time used'
+          description: 'Pay based on actual playtime when finished',
+          color: 'text-blue-600'
         }
       case 'hourly':
         return {
           icon: <Clock className="w-4 h-4" />,
-          label: 'Pre-paid',
-          description: 'Customer pays upfront for specific duration'
+          label: 'Pre-paid Hours',
+          description: 'Pay upfront for fixed duration',
+          color: 'text-green-600'
         }
       case 'package':
         return {
           icon: <Package className="w-4 h-4" />,
-          label: 'Package Deal',
-          description: 'Fixed price packages with set duration'
+          label: 'Package Deals',
+          description: 'Special bundled offers with savings',
+          color: 'text-purple-600'
         }
       default:
         return {
           icon: <Timer className="w-4 h-4" />,
-          label: 'Unknown',
-          description: ''
+          label: 'Timer Based',
+          description: 'Pay based on actual playtime',
+          color: 'text-blue-600'
         }
     }
   }
 
   // ============================================
-  // HANDLERS
+  // FORM HANDLERS
   // ============================================
 
-  const handleSubmit = async () => {
-    // Validation
-    if (!formData.unitId) {
+  const handleStartSession = async () => {
+    if (!currentUnit) {
       toast.error('Please select a unit')
       return
     }
 
-    if (formData.billingModel === 'hourly') {
-      if (hourlyOptions.length === 0) {
-        toast.error('No hourly options available for this unit')
-        return
-      }
-      if (formData.purchasedDuration < 15) {
-        toast.error('Minimum duration is 15 minutes')
-        return
-      }
-    }
+    // Customer name is optional - no validation needed
 
-    if (formData.billingModel === 'package') {
-      if (packages.length === 0) {
-        toast.error('No packages available for this unit')
-        return
-      }
-      if (!formData.packageId) {
-        toast.error('Please select a package')
-        return
-      }
+    if (formData.billingModel === 'package' && !formData.packageId) {
+      toast.error('Please select a package')
+      return
     }
-
-    setLoading(true)
 
     try {
+      setLoading(true)
+
       const requestBody = {
         unitId: formData.unitId,
-        billingModel: formData.billingModel,
         customerName: formData.customerName.trim() || undefined,
+        billingModel: formData.billingModel,
         purchasedDuration: formData.billingModel === 'hourly' ? formData.purchasedDuration : undefined,
-        packageId: formData.billingModel === 'package' ? formData.packageId : undefined,
-        notes: formData.notes.trim() || undefined
+        packageId: formData.billingModel === 'package' ? formData.packageId : undefined
+        // ✅ Removed notes field
       }
 
       const response = await fetch('/api/rentals/start', {
@@ -372,8 +360,8 @@ export function StartSessionDialog({
           billingModel: 'timer',
           customerName: '',
           purchasedDuration: 60,
-          packageId: '',
-          notes: ''
+          packageId: ''
+          // ✅ Removed notes field
         })
         
         onOpenChange(false)
@@ -397,8 +385,8 @@ export function StartSessionDialog({
       billingModel: 'timer',
       customerName: '',
       purchasedDuration: 60,
-      packageId: '',
-      notes: ''
+      packageId: ''
+      // ✅ Removed notes field
     })
     onOpenChange(false)
   }
@@ -412,7 +400,7 @@ export function StartSessionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-2xl max-h-[95vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center">
             <PlayCircle className="w-5 h-5 mr-2 text-green-600" />
@@ -423,7 +411,7 @@ export function StartSessionDialog({
           </DialogDescription>
         </DialogHeader>
         
-        <div className="space-y-6">
+        <div className="space-y-4">
           {/* Unit Selection */}
           <div className="space-y-2">
             <Label htmlFor="unit">Gaming Unit</Label>
@@ -442,9 +430,9 @@ export function StartSessionDialog({
                     <div className="flex items-center justify-between w-full">
                       <div className="flex items-center">
                         <Gamepad className="w-4 h-4 mr-2" />
-                        <span>{unit.customerDisplayName || unit.name}</span>
+                        <span className="truncate">{unit.customerDisplayName || unit.name}</span>
                       </div>
-                      <span className="text-sm text-gray-500 ml-4">
+                      <span className="text-sm text-gray-500 ml-2 whitespace-nowrap">
                         {formatCurrency(unit.hourlyRate)}/h
                       </span>
                     </div>
@@ -454,120 +442,103 @@ export function StartSessionDialog({
             </Select>
           </div>
 
-          {/* Unit Info */}
-          {currentUnit && (
-            <div className="bg-gray-50 p-3 rounded-lg">
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div>
-                  <span className="text-gray-600">Console:</span>
-                  <p className="font-medium">{currentUnit.consoleType}</p>
-                </div>
-                <div>
-                  <span className="text-gray-600">Controllers:</span>
-                  <p className="font-medium">{currentUnit.controllerCount}</p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Billing Model */}
-          <div className="space-y-3">
-            <Label htmlFor="billing">Billing Model</Label>
-            <Select 
-              value={formData.billingModel} 
-              onValueChange={(value: string) => 
-                setFormData(prev => ({ 
-                  ...prev, 
-                  billingModel: value as 'timer' | 'hourly' | 'package', 
-                  packageId: '' 
-                }))
-              }
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="timer">
-                  <div className="flex items-center">
-                    <Timer className="w-4 h-4 mr-2" />
-                    Timer (Pay at end)
-                  </div>
-                </SelectItem>
-                <SelectItem value="hourly">
-                  <div className="flex items-center">
-                    <Clock className="w-4 h-4 mr-2" />
-                    Hourly (Pre-paid)
-                  </div>
-                </SelectItem>
-                <SelectItem value="package">
-                  <div className="flex items-center">
-                    <Package className="w-4 h-4 mr-2" />
-                    Package Deal
-                  </div>
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            
-            {/* Billing Model Info */}
-            <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
-              <div className="flex items-start">
-                {billingInfo.icon}
-                <div className="ml-2">
-                  <p className="font-medium text-blue-900">{billingInfo.label}</p>
-                  <p className="text-sm text-blue-700">{billingInfo.description}</p>
-                </div>
-              </div>
+          {/* Customer Name */}
+          <div className="space-y-2">
+            <Label htmlFor="customerName">Customer Name (Optional)</Label>
+            <div className="relative">
+              <User className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+              <Input
+                id="customerName"
+                placeholder="Enter customer name (optional)"
+                value={formData.customerName}
+                onChange={(e) => setFormData(prev => ({ ...prev, customerName: e.target.value }))}
+                className="pl-10"
+              />
             </div>
           </div>
 
-          {/* Duration for Hourly - Now Dynamic from Database */}
+          {/* Billing Model */}
+          <div className="space-y-3">
+            <Label>Billing Model</Label>
+            <div className="grid grid-cols-3 gap-2">
+              {(['timer', 'hourly', 'package'] as const).map((model) => {
+                const info = getBillingModelInfo(model)
+                return (
+                  <Button
+                    key={model}
+                    type="button"
+                    variant={formData.billingModel === model ? "default" : "outline"}
+                    className={`h-auto p-2 flex flex-col items-center text-center ${
+                      formData.billingModel === model 
+                        ? 'bg-primary text-primary-foreground' 
+                        : 'hover:bg-gray-50'
+                    }`}
+                    onClick={() => setFormData(prev => ({ ...prev, billingModel: model, packageId: '' }))}
+                  >
+                    <div className={formData.billingModel === model ? 'text-primary-foreground' : info.color}>
+                      {info.icon}
+                    </div>
+                    <span className="text-xs font-medium mt-1 leading-tight">{info.label}</span>
+                  </Button>
+                )
+              })}
+            </div>
+            
+            {/* Billing model description */}
+            <div className="text-sm text-gray-600 bg-gray-50 p-2 rounded-md">
+              <div className="flex items-center">
+                <div className={billingInfo.color}>{billingInfo.icon}</div>
+                <span className="ml-2 font-medium">{billingInfo.label}</span>
+              </div>
+              <p className="mt-1 text-xs">{billingInfo.description}</p>
+            </div>
+          </div>
+
+          {/* Hourly Duration Selection */}
           {formData.billingModel === 'hourly' && (
             <div className="space-y-3">
-              <Label htmlFor="duration">Duration & Pricing</Label>
+              <Label htmlFor="duration">Select Duration</Label>
               
               {hourlyOptionsLoading ? (
-                <div className="flex items-center justify-center py-4 border border-gray-200 rounded-md">
-                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                <div className="flex items-center justify-center py-6 border border-gray-200 rounded-lg">
+                  <Loader2 className="w-5 h-5 animate-spin mr-2 text-blue-600" />
                   <span className="text-sm text-gray-600">Loading duration options...</span>
                 </div>
               ) : hourlyOptions.length > 0 ? (
-                <Select 
-                  value={formData.purchasedDuration.toString()} 
-                  onValueChange={(value: string) => 
-                    setFormData(prev => ({ ...prev, purchasedDuration: parseInt(value) }))
-                  }
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {hourlyOptions.map((option) => (
-                      <SelectItem key={option.id} value={option.duration.toString()}>
-                        <div className="flex flex-col items-start py-1 w-full">
-                          <div className="flex items-center justify-between w-full">
-                            <span className="font-medium">{option.label}</span>
-                            {option.isPopular && (
-                              <Badge variant="outline" className="ml-2 bg-green-50 text-green-700 border-green-200">
-                                Popular
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="flex items-center justify-between w-full">
-                            <span className="text-sm text-blue-600 font-semibold">
-                              {formatCurrency(option.price)}
-                            </span>
-                            {option.description && (
-                              <span className="text-xs text-gray-500">{option.description}</span>
-                            )}
+                <div className="grid grid-cols-2 gap-2">
+                  {hourlyOptions.map((option: HourlyOptionData) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, purchasedDuration: option.duration }))}
+                      className={`relative p-3 border-2 rounded-lg text-left transition-all hover:border-blue-300 ${
+                        formData.purchasedDuration === option.duration
+                          ? 'border-blue-500 bg-blue-50'
+                          : 'border-gray-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="font-medium text-sm">{option.label}</div>
+                          <div className="text-blue-600 font-semibold text-lg">
+                            {formatCurrency(option.price)}
                           </div>
                         </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                        {option.isPopular && (
+                          <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 text-xs">
+                            Popular
+                          </Badge>
+                        )}
+                      </div>
+                      {option.description && (
+                        <div className="text-xs text-gray-500 mt-1">{option.description}</div>
+                      )}
+                    </button>
+                  ))}
+                </div>
               ) : (
-                <div className="flex items-center justify-center py-4 border border-orange-200 bg-orange-50 rounded-md">
-                  <AlertCircle className="w-4 h-4 text-orange-600 mr-2" />
+                <div className="flex items-center justify-center py-6 border border-orange-200 bg-orange-50 rounded-lg">
+                  <AlertCircle className="w-5 h-5 text-orange-600 mr-2" />
                   <span className="text-sm text-orange-700">No hourly options available for this unit</span>
                 </div>
               )}
@@ -576,134 +547,131 @@ export function StartSessionDialog({
 
           {/* Package Selection */}
           {formData.billingModel === 'package' && (
-            <div className="space-y-2">
-              <Label htmlFor="package">Select Package</Label>
+            <div className="space-y-3">
+              <Label htmlFor="package">Select Package Deal</Label>
               
               {packagesLoading ? (
-                <div className="flex items-center justify-center py-4 border border-gray-200 rounded-md">
-                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                  <span className="text-sm text-gray-600">Loading packages...</span>
+                <div className="flex items-center justify-center py-6 border border-gray-200 rounded-lg">
+                  <Loader2 className="w-5 h-5 animate-spin mr-2 text-purple-600" />
+                  <span className="text-sm text-gray-600">Loading package deals...</span>
                 </div>
               ) : packages.length > 0 ? (
-                <Select 
-                  value={formData.packageId} 
-                  onValueChange={(value: string) => setFormData(prev => ({ ...prev, packageId: value }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Choose package" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {packages.map((pkg) => (
-                      <SelectItem key={pkg.id} value={pkg.id}>
-                        <div className="flex flex-col items-start py-1">
-                          <div className="flex items-center justify-between w-full">
-                            <span className="font-medium">{pkg.name}</span>
-                            <Badge variant="outline" className="ml-2">
-                              {formatDuration(pkg.durationMinutes)}
-                            </Badge>
+                <div className="grid grid-cols-1 gap-3">
+                  {packages.map((pkg: PackageData) => (
+                    <button
+                      key={pkg.id}
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, packageId: pkg.id }))}
+                      className={`relative p-4 border-2 rounded-lg text-left transition-all hover:border-purple-300 ${
+                        formData.packageId === pkg.id
+                          ? 'border-purple-500 bg-purple-50'
+                          : 'border-gray-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="font-semibold text-base text-gray-900">{pkg.name}</div>
+                          <div className="text-sm text-gray-600 mt-1">
+                            <Clock className="w-4 h-4 inline mr-1" />
+                            {formatDuration(pkg.duration)}
                           </div>
-                          <span className="text-sm text-green-600 font-semibold">
-                            {formatCurrency(pkg.price)}
-                          </span>
                           {pkg.description && (
-                            <span className="text-xs text-gray-500">{pkg.description}</span>
+                            <div className="text-xs text-gray-500 mt-2">{pkg.description}</div>
                           )}
                         </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                        <div className="text-right">
+                          <div className="text-purple-600 font-bold text-xl">
+                            {formatCurrency(pkg.price)}
+                          </div>
+                          {currentUnit && (
+                            <div className="text-xs text-gray-500">
+                              {(() => {
+                                // Fixed calculation using correct property name
+                                const durationHours = pkg.duration / 60
+                                const hourlyEquivalent = Math.ceil(durationHours * currentUnit.hourlyRate)
+                                const savings = Math.max(0, hourlyEquivalent - pkg.price)
+                                
+                                if (savings > 0) {
+                                  const savingsPercent = Math.round((savings / hourlyEquivalent) * 100)
+                                  return `Save ${formatCurrency(savings)} (${savingsPercent}%)`
+                                } else {
+                                  return `${formatCurrency(pkg.price)} total`
+                                }
+                              })()}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
               ) : (
-                <div className="flex items-center justify-center py-4 border border-orange-200 bg-orange-50 rounded-md">
-                  <AlertCircle className="w-4 h-4 text-orange-600 mr-2" />
-                  <span className="text-sm text-orange-700">No packages available for this unit</span>
+                <div className="flex items-center justify-center py-6 border border-orange-200 bg-orange-50 rounded-lg">
+                  <AlertCircle className="w-5 h-5 text-orange-600 mr-2" />
+                  <span className="text-sm text-orange-700">No package deals available for this unit</span>
                 </div>
               )}
             </div>
           )}
-
-          {/* Customer Name */}
-          <div className="space-y-2">
-            <Label htmlFor="customer">Customer Name (Optional)</Label>
-            <div className="relative">
-              <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <Input
-                id="customer"
-                placeholder="Enter customer name"
-                value={formData.customerName}
-                onChange={(e) => setFormData(prev => ({ ...prev, customerName: e.target.value }))}
-                className="pl-10"
-              />
-            </div>
-          </div>
-
-          {/* Notes */}
-          <div className="space-y-2">
-            <Label htmlFor="notes">Notes (Optional)</Label>
-            <Textarea
-              id="notes"
-              placeholder="Any special notes for this session..."
-              value={formData.notes}
-              onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
-              rows={2}
-              className="resize-none"
-            />
-          </div>
 
           {/* Cost Summary */}
           {estimatedCost > 0 && (
-            <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-              <div className="flex items-center justify-between">
-                <span className="font-medium text-green-900">Estimated Cost:</span>
-                <span className="text-lg font-bold text-green-700">
-                  {formatCurrency(estimatedCost)}
-                </span>
-              </div>
-              {formData.billingModel === 'hourly' && (
-                <p className="text-sm text-green-600 mt-1">
-                  Pre-paid for {formatDuration(formData.purchasedDuration)}
-                </p>
-              )}
-              {formData.billingModel === 'package' && packages.find(p => p.id === formData.packageId) && (
-                <p className="text-sm text-green-600 mt-1">
-                  Package: {formatDuration(packages.find(p => p.id === formData.packageId)!.durationMinutes)}
-                </p>
-              )}
-            </div>
-          )}
-
-          {formData.billingModel === 'timer' && (
-            <div className="bg-amber-50 p-3 rounded-lg border border-amber-200">
-              <div className="flex items-start">
-                <Timer className="w-4 h-4 text-amber-600 mr-2 mt-0.5" />
-                <div>
-                  <p className="text-sm font-medium text-amber-800">Timer Mode</p>
-                  <p className="text-xs text-amber-700">
-                    Customer will pay at the end based on actual time played
-                  </p>
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4">
+              <h4 className="font-semibold text-blue-900 mb-3 flex items-center">
+                <div className={billingInfo.color}>{billingInfo.icon}</div>
+                <span className="ml-2">Session Summary</span>
+              </h4>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between items-center">
+                  <span className="text-blue-700">Unit:</span>
+                  <span className="font-medium text-gray-900">{currentUnit?.customerDisplayName || currentUnit?.name}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-blue-700">Billing:</span>
+                  <span className="font-medium text-gray-900">{billingInfo.label}</span>
+                </div>
+                {formData.billingModel === 'hourly' && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-blue-700">Duration:</span>
+                    <span className="font-medium text-gray-900">{formatDuration(formData.purchasedDuration)}</span>
+                  </div>
+                )}
+                {formData.billingModel === 'package' && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-blue-700">Package:</span>
+                    <span className="font-medium text-gray-900">
+                      {packages.find((pkg: PackageData) => pkg.id === formData.packageId)?.name}
+                    </span>
+                  </div>
+                )}
+                <div className="border-t border-blue-200 pt-2 mt-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-blue-700 font-semibold">Total Cost:</span>
+                    <span className="font-bold text-blue-900 text-lg">{formatCurrency(estimatedCost)}</span>
+                  </div>
                 </div>
               </div>
             </div>
           )}
         </div>
 
-        <DialogFooter className="flex-col sm:flex-row gap-2">
-          <Button 
-            variant="outline" 
-            onClick={handleCancel} 
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleCancel}
             disabled={loading}
-            className="w-full sm:w-auto"
           >
             Cancel
           </Button>
-          <Button 
-            onClick={handleSubmit} 
-            disabled={loading || !formData.unitId || (formData.billingModel === 'package' && !formData.packageId)}
-            className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white"
+          <Button
+            type="button"
+            onClick={handleStartSession}
+            disabled={loading || !formData.unitId}
           >
             {loading ? (
               <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
                 Starting...
               </>
             ) : (

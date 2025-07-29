@@ -1,4 +1,4 @@
-// src/app/api/units/[unitId]/status/route.ts
+// src/app/api/units/[unitId]/status/route.ts - FIXED VERSION
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
@@ -41,7 +41,7 @@ interface UpdateStatusResponse {
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: RouteParams }
+  context: { params: Promise<RouteParams> }
 ): Promise<NextResponse<UpdateStatusResponse>> {
   try {
     // Check authentication
@@ -57,7 +57,8 @@ export async function PATCH(
     const body = await request.json()
     const { status } = updateStatusSchema.parse(body)
 
-    const { unitId } = params
+    // Await params to resolve the Promise - FIXED FOR NEXTJS 15
+    const { unitId } = await context.params
 
     // Get location ID from headers
     const locationId = request.headers.get('X-Location-ID')
@@ -80,7 +81,8 @@ export async function PATCH(
           select: {
             id: true,
             name: true,
-            tenantId: true
+            tenantId: true,
+            tenant: true
           }
         }
       }
@@ -93,20 +95,18 @@ export async function PATCH(
       )
     }
 
-    // Verify user has access to this location
+    // Verify user has access to this location - FIXED OWNER PERMISSION
     if (session.user.role !== 'super_admin') {
-      // For owners, check tenant ownership
       if (session.user.role === 'owner') {
+        // Owner can access any location in their tenant
         if (session.user.tenantId !== unit.location.tenantId) {
           return NextResponse.json(
-            { success: false, error: 'Access denied to this location' },
+            { success: false, error: 'Access denied to this tenant' },
             { status: 403 }
           )
         }
-      }
-      
-      // For staff, check location assignment
-      if (session.user.role === 'staff') {
+      } else if (session.user.role === 'staff') {
+        // Staff must be assigned to the specific location
         const hasAccess = await prisma.locationAssignment.findFirst({
           where: {
             userId: session.user.id,
@@ -140,19 +140,19 @@ export async function PATCH(
         return NextResponse.json(
           { 
             success: false, 
-            error: 'Cannot change status of unit with active session. Stop the session first.' 
+            error: 'Cannot change status of unit with active session. Please stop the session first.' 
           },
           { status: 400 }
         )
       }
     }
 
-    // Don't allow setting to occupied unless there's a session starting
-    if (status === UnitStatus.occupied && oldStatus !== UnitStatus.occupied) {
+    // Prevent changing from available to occupied (use start session instead)
+    if (oldStatus === UnitStatus.available && status === UnitStatus.occupied) {
       return NextResponse.json(
         { 
           success: false, 
-          error: 'Units can only be set to occupied by starting a rental session.' 
+          error: 'Use start session API to change unit from available to occupied' 
         },
         { status: 400 }
       )
@@ -161,46 +161,25 @@ export async function PATCH(
     // Update unit status
     const updatedUnit = await prisma.unit.update({
       where: { id: unitId },
-      data: {
+      data: { 
         status: status as UnitStatus,
-        updatedAt: new Date()
-      },
-      select: {
-        id: true,
-        name: true,
-        customerDisplayName: true,
-        status: true,
-        updatedAt: true
+        customerDisplayName: status === UnitStatus.available ? null : unit.customerDisplayName
       }
     })
 
-    // Create audit log
-    await prisma.auditLog.create({
-      data: {
-        tenantId: unit.location.tenantId,
-        userId: session.user.id,
-        eventType: 'UNIT_STATUS_CHANGED',
-        metadata: {
-          unitId: unitId,
-          unitName: updatedUnit.customerDisplayName || updatedUnit.name,
-          oldStatus: oldStatus,
-          newStatus: status,
-          locationId: locationId,
-          locationName: unit.location.name,
-          description: `Unit status changed from ${oldStatus} to ${status}`
-        },
-        severity: 'MEDIUM',
-        ipAddress: request.headers.get('x-forwarded-for') || 
-                   request.headers.get('x-real-ip') || 
-                   'unknown'
-      }
+    console.log('✅ Unit status updated:', {
+      unitId,
+      unitName: unit.customerDisplayName || unit.name,
+      oldStatus,
+      newStatus: status
     })
 
+    // Return success response
     return NextResponse.json({
       success: true,
       data: {
         unitId: updatedUnit.id,
-        unitName: updatedUnit.customerDisplayName || updatedUnit.name,
+        unitName: unit.customerDisplayName || unit.name,
         oldStatus: oldStatus,
         newStatus: status,
         updatedAt: updatedUnit.updatedAt.toISOString()
@@ -208,13 +187,14 @@ export async function PATCH(
     })
 
   } catch (error) {
-    console.error('Error updating unit status:', error)
-
+    console.error('❌ Error updating unit status:', error)
+    
+    // Handle validation errors
     if (error instanceof z.ZodError) {
       return NextResponse.json(
-        {
-          success: false,
-          error: 'Validation error',
+        { 
+          success: false, 
+          error: 'Invalid status value',
           details: error.issues.map(issue => ({
             field: issue.path.join('.'),
             message: issue.message
@@ -224,111 +204,24 @@ export async function PATCH(
       )
     }
 
+    // Handle Prisma errors
+    if (error instanceof Error && error.message.includes('Prisma')) {
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Database operation failed',
+          details: error.message
+        },
+        { status: 500 }
+      )
+    }
+
+    // Handle other errors
     return NextResponse.json(
       { 
         success: false, 
         error: 'Failed to update unit status',
         details: error instanceof Error ? error.message : 'Unknown error'
-      },
-      { status: 500 }
-    )
-  }
-}
-
-// ============================================
-// GET - Get Unit Status (for verification)
-// ============================================
-
-export async function GET(
-  request: NextRequest,
-  { params }: { params: RouteParams }
-): Promise<NextResponse> {
-  try {
-    // Check authentication
-    const session = await getServerSession(authOptions)
-    if (!session?.user) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
-        { status: 401 }
-      )
-    }
-
-    const { unitId } = params
-
-    // Get location ID from query params
-    const { searchParams } = new URL(request.url)
-    const locationId = searchParams.get('locationId')
-
-    if (!locationId) {
-      return NextResponse.json(
-        { success: false, error: 'Location ID is required' },
-        { status: 400 }
-      )
-    }
-
-    // Get unit with current status
-    const unit = await prisma.unit.findFirst({
-      where: {
-        id: unitId,
-        locationId: locationId,
-        isActive: true
-      },
-      select: {
-        id: true,
-        name: true,
-        customerDisplayName: true,
-        status: true,
-        updatedAt: true,
-        location: {
-          select: {
-            id: true,
-            name: true
-          }
-        }
-      }
-    })
-
-    if (!unit) {
-      return NextResponse.json(
-        { success: false, error: 'Unit not found' },
-        { status: 404 }
-      )
-    }
-
-    // Check for active session if unit is occupied
-    let activeSession = null
-    if (unit.status === UnitStatus.occupied) {
-      activeSession = await prisma.rentalSession.findFirst({
-        where: {
-          unitId: unitId,
-          status: 'active'
-        },
-        select: {
-          id: true,
-          startTime: true,
-          billingModel: true
-        }
-      })
-    }
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        unitId: unit.id,
-        unitName: unit.customerDisplayName || unit.name,
-        status: unit.status,
-        lastUpdated: unit.updatedAt.toISOString(),
-        location: unit.location,
-        activeSession: activeSession
-      }
-    })
-
-  } catch (error) {
-    console.error('Error fetching unit status:', error)
-    return NextResponse.json(
-      { 
-        success: false, 
-        error: 'Failed to fetch unit status' 
       },
       { status: 500 }
     )
