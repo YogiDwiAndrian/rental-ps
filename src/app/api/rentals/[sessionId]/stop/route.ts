@@ -1,10 +1,10 @@
-// src/app/api/rentals/[sessionId]/stop/route.ts - FIXED VERSION
+// src/app/api/rentals/[sessionId]/stop/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { z } from 'zod'
-import { SessionStatus, UnitStatus, PaymentStatus } from '@prisma/client'
+import { SessionStatus, PaymentStatus, TransactionType, UnitStatus } from '@prisma/client'
 
 // ============================================
 // VALIDATION SCHEMA
@@ -12,42 +12,115 @@ import { SessionStatus, UnitStatus, PaymentStatus } from '@prisma/client'
 
 const stopSessionSchema = z.object({
   paymentMethod: z.enum(['cash', 'card', 'digital_wallet']).default('cash'),
-  fnbAmount: z.number().min(0).default(0),
-  additionalNotes: z.string().optional()
+  fnbAmount: z.number().min(0).optional(), // Additional manual F&B
+  notes: z.string().optional()
 })
 
+type StopSessionRequest = z.infer<typeof stopSessionSchema>
+
 // ============================================
-// TYPES
+// RESPONSE TYPES
 // ============================================
 
+interface SessionDetails {
+  unitName: string
+  startTime: string
+  endTime: string
+  duration: string
+  billingType: string
+  sessionCost: number
+}
+
+interface FnbOrderItem {
+  name: string
+  quantity: number
+  unitPrice: number
+  totalPrice: number
+}
+
+interface FnbOrderReceipt {
+  orderId: string
+  items: FnbOrderItem[]
+  totalAmount: number
+  status: string
+}
+
+interface PaymentDetails {
+  sessionSubtotal: number
+  fnbAttachedSubtotal: number
+  fnbManualSubtotal: number
+  totalAmount: number
+  paymentMethod: string
+  paidAt: string
+}
+
+interface Receipt {
+  sessionDetails: SessionDetails
+  fnbAttachedOrders: FnbOrderReceipt[]
+  fnbManualAmount: number
+  payment: PaymentDetails
+}
+
 interface StopSessionResponse {
-  success: boolean
-  data?: {
-    sessionId: string
-    unitName: string
-    totalDuration: number
-    finalAmount: number
-    additionalAmount: number
-    fnbAmount: number
-    endTime: string
-  }
-  error?: string
-  details?: unknown
+  sessionId: string
+  finalTotal: number
+  sessionCost: number
+  fnbAttachedCost: number
+  fnbManualCost: number
+  completedAt: string
+  receipt: Receipt
 }
 
 // ============================================
-// POST HANDLER
+// UTILITY FUNCTIONS
+// ============================================
+
+function calculateSessionDuration(startTime: Date, endTime: Date): number {
+  return Math.ceil((endTime.getTime() - startTime.getTime()) / (1000 * 60))
+}
+
+function formatDuration(minutes: number): string {
+  const hours = Math.floor(minutes / 60)
+  const mins = minutes % 60
+  
+  if (hours === 0) return `${mins} menit`
+  if (mins === 0) return `${hours} jam`
+  return `${hours} jam ${mins} menit`
+}
+
+function calculateTimerBilling(durationMinutes: number, hourlyRate: number): number {
+  return Math.ceil(durationMinutes * (hourlyRate / 60))
+}
+
+function calculateOvertimeCharge(
+  session: { billingModel: string; startTime: Date; purchasedDuration: number },
+  endTime: Date,
+  hourlyRate: number
+): number {
+  if (session.billingModel !== 'hourly' && session.billingModel !== 'package') {
+    return 0
+  }
+
+  const actualDurationMinutes = calculateSessionDuration(session.startTime, endTime)
+  const overtimeMinutes = Math.max(0, actualDurationMinutes - session.purchasedDuration)
+  
+  if (overtimeMinutes <= 5) { // 5 minute grace period
+    return 0
+  }
+
+  return Math.ceil((overtimeMinutes / 60) * hourlyRate)
+}
+
+// ============================================
+// POST: STOP SESSION
 // ============================================
 
 export async function POST(
   request: NextRequest,
-  context: { params: Promise<{ sessionId: string }> }
-): Promise<NextResponse<StopSessionResponse>> {
+  { params }: { params: { sessionId: string } }
+) {
   try {
-    // Resolve params
-    const { sessionId } = await context.params
-    
-    // Check authentication
+    // ===== AUTHENTICATION =====
     const session = await getServerSession(authOptions)
     if (!session?.user) {
       return NextResponse.json(
@@ -56,20 +129,47 @@ export async function POST(
       )
     }
 
-    // Get location ID from header
+    // Check permissions
+    if (session.user.role !== 'staff' && session.user.role !== 'owner') {
+      return NextResponse.json(
+        { success: false, error: 'Insufficient permissions' },
+        { status: 403 }
+      )
+    }
+
+    // ===== GET LOCATION ID =====
     const locationId = request.headers.get('X-Location-ID')
     if (!locationId) {
       return NextResponse.json(
-        { success: false, error: 'Location ID is required' },
+        { success: false, error: 'Location ID required in headers' },
         { status: 400 }
       )
     }
 
-    // Parse and validate request body
+    // ===== VALIDATE REQUEST BODY =====
     const body = await request.json()
     const validatedData = stopSessionSchema.parse(body)
+    const { sessionId } = params
 
-    // Get active rental session with related data
+    // ===== VERIFY LOCATION ACCESS =====
+    if (session.user.role === 'staff') {
+      const hasAccess = await prisma.locationAssignment.findFirst({
+        where: {
+          userId: session.user.id,
+          locationId: locationId,
+          isActive: true
+        }
+      })
+
+      if (!hasAccess) {
+        return NextResponse.json(
+          { success: false, error: 'Access denied to this location' },
+          { status: 403 }
+        )
+      }
+    }
+
+    // ===== GET RENTAL SESSION =====
     const rentalSession = await prisma.rentalSession.findFirst({
       where: {
         id: sessionId,
@@ -78,22 +178,16 @@ export async function POST(
       },
       include: {
         unit: {
-          include: {
-            location: {
-              include: {
-                tenant: true
-              }
-            }
+          select: {
+            id: true,
+            name: true,
+            hourlyRate: true
           }
         },
-        transactions: true,
-        fnbOrders: {
-          include: {
-            fnbOrderItems: {
-              include: {
-                fnbItem: true
-              }
-            }
+        location: {
+          select: {
+            id: true,
+            name: true
           }
         }
       }
@@ -106,176 +200,205 @@ export async function POST(
       )
     }
 
-    // Verify user has access to this location - FIXED OWNER PERMISSION
-    if (session.user.role !== 'super_admin') {
-      if (session.user.role === 'owner') {
-        // Owner can access any location in their tenant
-        if (session.user.tenantId !== rentalSession.unit.location.tenant.id) {
-          return NextResponse.json(
-            { success: false, error: 'Access denied to this tenant' },
-            { status: 403 }
-          )
-        }
-      } else if (session.user.role === 'staff') {
-        // Staff must be assigned to the specific location
-        const hasAccess = await prisma.locationAssignment.findFirst({
-          where: {
-            userId: session.user.id,
-            locationId: locationId,
-            isActive: true
-          }
-        })
-
-        if (!hasAccess) {
-          return NextResponse.json(
-            { success: false, error: 'Access denied to this location' },
-            { status: 403 }
-          )
-        }
-      }
-    }
-
+    // ===== CALCULATE SESSION COST =====
     const endTime = new Date()
-    const durationMinutes = Math.floor((endTime.getTime() - rentalSession.startTime.getTime()) / (1000 * 60))
-
-    // Calculate final amount based on billing model
-    let finalAmount = parseFloat(rentalSession.totalAmount.toString())
-    let additionalAmount = 0
-
-    if (rentalSession.billingModel === 'timer') {
-      // Timer mode - calculate based on actual duration
-      const hourlyRate = parseFloat(rentalSession.unit.hourlyRate.toString())
-      finalAmount = Math.ceil((durationMinutes / 60) * hourlyRate)
-    } else if (rentalSession.billingModel === 'hourly') {
-      // Hourly mode - check for overtime
-      const totalPurchasedDuration = rentalSession.purchasedDuration + rentalSession.extendedDuration
-      
-      if (durationMinutes > totalPurchasedDuration) {
-        // Calculate overtime charges
-        const overtimeMinutes = durationMinutes - totalPurchasedDuration
-        const hourlyRate = parseFloat(rentalSession.unit.hourlyRate.toString())
-        additionalAmount = Math.ceil((overtimeMinutes / 60) * hourlyRate)
-        finalAmount += additionalAmount
-      }
+    const startTime = new Date(rentalSession.startTime)
+    const actualDurationMinutes = calculateSessionDuration(startTime, endTime)
+    const hourlyRate = Number(rentalSession.unit.hourlyRate)
+    
+    let sessionCost = 0
+    let overtimeCost = 0
+    
+    switch (rentalSession.billingModel) {
+      case 'timer':
+        sessionCost = calculateTimerBilling(actualDurationMinutes, hourlyRate)
+        break
+      case 'hourly':
+      case 'package':
+        // Base cost is already paid upfront
+        sessionCost = Number(rentalSession.totalAmount)
+        // Calculate overtime if any
+        overtimeCost = calculateOvertimeCharge(
+          {
+            billingModel: rentalSession.billingModel,
+            startTime: startTime,
+            purchasedDuration: rentalSession.purchasedDuration + rentalSession.extendedDuration
+          },
+          endTime,
+          hourlyRate
+        )
+        sessionCost += overtimeCost
+        break
+      default:
+        throw new Error(`Unknown billing model: ${rentalSession.billingModel}`)
     }
-    // Package mode uses existing totalAmount
 
-    // Add F&B amount if provided
-    const fnbAmount = validatedData.fnbAmount || 0
-    finalAmount += fnbAmount
+    // ===== GET ATTACHED F&B ORDERS =====
+    const attachedFnbOrders = await prisma.fnbOrder.findMany({
+      where: {
+        rentalSessionId: sessionId
+      },
+      include: {
+        fnbOrderItems: {
+          include: {
+            fnbItem: {
+              select: {
+                name: true
+              }
+            }
+          }
+        }
+      }
+    })
 
-    // Execute database transaction to stop session
+    const totalAttachedFnbCost = attachedFnbOrders.reduce(
+      (sum, order) => sum + Number(order.totalAmount), 
+      0
+    )
+
+    const manualFnbCost = validatedData.fnbAmount || 0
+    const totalFnbCost = totalAttachedFnbCost + manualFnbCost
+    const finalTotal = sessionCost + totalFnbCost
+
+    // ===== DATABASE TRANSACTION =====
     const result = await prisma.$transaction(async (tx) => {
-      // Update session status and end time
+      // Update rental session
       const updatedSession = await tx.rentalSession.update({
         where: { id: sessionId },
         data: {
           status: SessionStatus.completed,
           endTime: endTime,
-          totalAmount: finalAmount
+          totalAmount: sessionCost
         }
       })
 
-      // Update unit status back to available
+      // Create rental transaction
+      const rentalTransaction = await tx.transaction.create({
+        data: {
+          locationId: locationId,
+          rentalSessionId: sessionId,
+          type: TransactionType.rental,
+          amount: sessionCost,
+          paymentStatus: PaymentStatus.paid,
+          paymentMethod: validatedData.paymentMethod,
+          description: overtimeCost > 0 
+            ? `Rental completed - ${rentalSession.unit.name} (includes overtime: ${formatCurrency(overtimeCost)})`
+            : `Rental completed - ${rentalSession.unit.name}`
+        }
+      })
+
+      // Create F&B transactions for attached orders
+      const fnbTransactions = []
+      for (const order of attachedFnbOrders) {
+        const fnbTransaction = await tx.transaction.create({
+          data: {
+            locationId: locationId,
+            fnbOrderId: order.id,
+            type: TransactionType.fnb,
+            amount: Number(order.totalAmount),
+            paymentStatus: PaymentStatus.paid,
+            paymentMethod: validatedData.paymentMethod,
+            description: `F&B order completed - attached to session`
+          }
+        })
+        fnbTransactions.push(fnbTransaction)
+      }
+
+      // Create manual F&B transaction if any
+      let manualFnbTransaction = null
+      if (manualFnbCost > 0) {
+        manualFnbTransaction = await tx.transaction.create({
+          data: {
+            locationId: locationId,
+            rentalSessionId: sessionId,
+            type: TransactionType.fnb,
+            amount: manualFnbCost,
+            paymentStatus: PaymentStatus.paid,
+            paymentMethod: validatedData.paymentMethod,
+            description: `Manual F&B charge - ${validatedData.notes || 'Additional items'}`
+          }
+        })
+      }
+
+      // Update unit status
       await tx.unit.update({
         where: { id: rentalSession.unitId },
         data: { 
           status: UnitStatus.available,
-          customerDisplayName: null
+          customerDisplayName: null // Clear customer name
         }
       })
 
-      // Create payment transaction for additional charges (timer mode or overtime)
-      if (rentalSession.billingModel === 'timer' || additionalAmount > 0) {
-        const paymentAmount = rentalSession.billingModel === 'timer' 
-          ? finalAmount - fnbAmount 
-          : additionalAmount
-
-        await tx.transaction.create({
-          data: {
-            locationId: locationId,
-            rentalSessionId: sessionId,
-            type: 'rental',
-            amount: paymentAmount,
-            paymentStatus: PaymentStatus.paid,
-            paymentMethod: validatedData.paymentMethod,
-            description: rentalSession.billingModel === 'timer' 
-              ? `Timer session: ${durationMinutes} minutes`
-              : `Overtime charges: ${Math.floor(additionalAmount / parseFloat(rentalSession.unit.hourlyRate.toString()) * 60)} minutes`
-          }
-        })
+      return {
+        session: updatedSession,
+        rentalTransaction,
+        fnbTransactions,
+        manualFnbTransaction
       }
-
-      // Create F&B payment transaction if there's F&B amount
-      if (fnbAmount > 0) {
-        await tx.transaction.create({
-          data: {
-            locationId: locationId,
-            rentalSessionId: sessionId,
-            type: 'fnb',
-            amount: fnbAmount,
-            paymentStatus: PaymentStatus.paid,
-            paymentMethod: validatedData.paymentMethod,
-            description: 'F&B orders'
-          }
-        })
-      }
-
-      // Update work session revenue if active
-      const activeWorkSession = await tx.workSession.findFirst({
-        where: {
-          locationId: locationId,
-          status: 'active'
-        }
-      })
-
-      if (activeWorkSession) {
-        const sessionRevenue = rentalSession.billingModel === 'timer' ? finalAmount - fnbAmount : additionalAmount
-        const revenueField = rentalSession.billingModel === 'package' ? 'packageRevenue' : 
-                           rentalSession.billingModel === 'hourly' ? 'hourlyRevenue' : 'payLaterRevenue'
-        
-        await tx.workSession.update({
-          where: { id: activeWorkSession.id },
-          data: {
-            totalRevenue: { increment: finalAmount },
-            [revenueField]: { increment: sessionRevenue }
-          }
-        })
-      }
-
-      return updatedSession
     })
 
-    console.log('✅ Session stopped successfully:', {
-      sessionId,
-      duration: durationMinutes,
-      finalAmount,
-      billingModel: rentalSession.billingModel
-    })
+    // ===== PREPARE RECEIPT DATA =====
+    const durationString = formatDuration(actualDurationMinutes)
+    
+    const fnbAttachedOrdersData: FnbOrderReceipt[] = attachedFnbOrders.map(order => ({
+      orderId: order.id,
+      items: order.fnbOrderItems.map(item => ({
+        name: item.fnbItem.name,
+        quantity: item.quantity,
+        unitPrice: Number(item.unitPrice),
+        totalPrice: Number(item.totalPrice)
+      })),
+      totalAmount: Number(order.totalAmount),
+      status: order.status
+    }))
 
-    // Return success response
+    const receipt: Receipt = {
+      sessionDetails: {
+        unitName: rentalSession.unit.name,
+        startTime: startTime.toISOString(),
+        endTime: endTime.toISOString(),
+        duration: durationString,
+        billingType: rentalSession.billingModel,
+        sessionCost: sessionCost
+      },
+      fnbAttachedOrders: fnbAttachedOrdersData,
+      fnbManualAmount: manualFnbCost,
+      payment: {
+        sessionSubtotal: sessionCost,
+        fnbAttachedSubtotal: totalAttachedFnbCost,
+        fnbManualSubtotal: manualFnbCost,
+        totalAmount: finalTotal,
+        paymentMethod: validatedData.paymentMethod,
+        paidAt: endTime.toISOString()
+      }
+    }
+
+    // ===== PREPARE RESPONSE =====
+    const responseData: StopSessionResponse = {
+      sessionId: sessionId,
+      finalTotal: finalTotal,
+      sessionCost: sessionCost,
+      fnbAttachedCost: totalAttachedFnbCost,
+      fnbManualCost: manualFnbCost,
+      completedAt: endTime.toISOString(),
+      receipt: receipt
+    }
+
     return NextResponse.json({
       success: true,
-      data: {
-        sessionId: result.id,
-        unitName: rentalSession.unit.customerDisplayName || rentalSession.unit.name,
-        totalDuration: durationMinutes,
-        finalAmount: finalAmount,
-        additionalAmount: additionalAmount,
-        fnbAmount: fnbAmount,
-        endTime: endTime.toISOString()
-      }
+      data: responseData,
+      message: 'Session stopped and payment processed successfully'
     })
 
   } catch (error) {
-    console.error('❌ Error stopping session:', error)
-    
-    // Handle validation errors
+    console.error('Stop Session API Error:', error)
+
+    // Handle Zod validation errors
     if (error instanceof z.ZodError) {
       return NextResponse.json(
-        { 
-          success: false, 
-          error: 'Invalid input data',
+        {
+          success: false,
+          error: 'Validation error',
           details: error.issues.map(issue => ({
             field: issue.path.join('.'),
             message: issue.message
@@ -284,15 +407,27 @@ export async function POST(
         { status: 400 }
       )
     }
-
+    
     // Handle other errors
     return NextResponse.json(
-      { 
-        success: false, 
+      {
+        success: false,
         error: 'Failed to stop session',
         details: error instanceof Error ? error.message : 'Unknown error'
       },
       { status: 500 }
     )
   }
+}
+
+// ============================================
+// UTILITY FUNCTION FOR CURRENCY FORMATTING
+// ============================================
+
+function formatCurrency(amount: number): string {
+  return new Intl.NumberFormat('id-ID', {
+    style: 'currency',
+    currency: 'IDR',
+    minimumFractionDigits: 0
+  }).format(amount)
 }

@@ -1,7 +1,7 @@
 // src/components/staff/stop-session-dialog.tsx
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { 
   Dialog, 
@@ -22,6 +22,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Separator } from '@/components/ui/separator'
+import { Badge } from '@/components/ui/badge'
 import { 
   StopCircle, 
   CreditCard, 
@@ -29,8 +30,9 @@ import {
   Smartphone,
   Coffee,
   Clock,
-  DollarSign,
-  Receipt
+  Receipt,
+  AlertTriangle,
+  ShoppingBag
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -48,6 +50,24 @@ interface ActiveSession {
   remainingMinutes?: number
   totalAmount?: number
   isOvertime: boolean
+  purchasedDuration?: number
+  extendedDuration?: number
+}
+
+interface FnbOrderItem {
+  id: string
+  name: string
+  quantity: number
+  unitPrice: number
+  totalPrice: number
+}
+
+interface AttachedFnbOrder {
+  id: string
+  totalAmount: number
+  status: string
+  items: FnbOrderItem[]
+  createdAt: string
 }
 
 interface StopSessionDialogProps {
@@ -55,6 +75,7 @@ interface StopSessionDialogProps {
   onOpenChange: (open: boolean) => void
   session?: ActiveSession
   locationId: string
+  hourlyRate?: number
   onSuccess?: () => void
 }
 
@@ -85,33 +106,45 @@ const calculateDuration = (startTime: string): string => {
   const hours = Math.floor(totalMinutes / 60)
   const minutes = totalMinutes % 60
   
-  if (hours === 0) return `${minutes}m`
-  if (minutes === 0) return `${hours}h`
-  return `${hours}h ${minutes}m`
+  if (hours === 0) return `${minutes} menit`
+  if (minutes === 0) return `${hours} jam`
+  return `${hours} jam ${minutes} menit`
 }
 
-const calculateFinalAmount = (session: ActiveSession, fnbAmount: number): number => {
-  const baseAmount = session.totalAmount || 0
+const calculateActualDuration = (startTime: string): number => {
+  const start = new Date(startTime).getTime()
+  const now = Date.now()
+  return Math.floor((now - start) / (1000 * 60))
+}
+
+const calculateSessionCost = (
+  session: ActiveSession, 
+  hourlyRate: number = 25000
+): { baseCost: number; overtimeCost: number; totalCost: number } => {
+  const actualMinutes = calculateActualDuration(session.startTime)
   
   if (session.billingModel === 'timer') {
-    // Timer mode - calculate based on actual duration
-    const start = new Date(session.startTime).getTime()
-    const now = Date.now()
-    const durationHours = (now - start) / (1000 * 60 * 60)
-    const hourlyRate = 25000 // Default rate - this should come from session data
-    return Math.ceil(durationHours * hourlyRate) + fnbAmount
+    const cost = Math.ceil((actualMinutes / 60) * hourlyRate)
+    return { baseCost: cost, overtimeCost: 0, totalCost: cost }
   }
   
-  if (session.billingModel === 'hourly' && session.isOvertime) {
-    // Calculate overtime charges
-    const overtimeMinutes = session.remainingMinutes ? Math.abs(session.remainingMinutes) : 0
-    const overtimeHours = overtimeMinutes / 60
-    const hourlyRate = 25000 // This should come from session data
-    const overtimeCharge = Math.ceil(overtimeHours * hourlyRate)
-    return baseAmount + overtimeCharge + fnbAmount
+  if (session.billingModel === 'hourly' || session.billingModel === 'package') {
+    const baseCost = session.totalAmount || 0
+    const purchasedMinutes = (session.purchasedDuration || 0) + (session.extendedDuration || 0)
+    const overtimeMinutes = Math.max(0, actualMinutes - purchasedMinutes)
+    
+    // 5 minute grace period
+    const chargeableOvertime = Math.max(0, overtimeMinutes - 5)
+    const overtimeCost = chargeableOvertime > 0 ? Math.ceil((chargeableOvertime / 60) * hourlyRate) : 0
+    
+    return { 
+      baseCost: baseCost, 
+      overtimeCost: overtimeCost, 
+      totalCost: baseCost + overtimeCost 
+    }
   }
   
-  return baseAmount + fnbAmount
+  return { baseCost: 0, overtimeCost: 0, totalCost: 0 }
 }
 
 // ============================================
@@ -123,25 +156,73 @@ export function StopSessionDialog({
   onOpenChange, 
   session, 
   locationId, 
+  hourlyRate = 25000,
   onSuccess 
 }: StopSessionDialogProps) {
   const [loading, setLoading] = useState(false)
+  const [fetchingFnb, setFetchingFnb] = useState(false)
+  const [attachedFnbOrders, setAttachedFnbOrders] = useState<AttachedFnbOrder[]>([])
   const [formData, setFormData] = useState<StopFormData>({
     paymentMethod: 'cash',
     fnbAmount: 0,
     notes: ''
   })
 
-  if (!session) return null
+  // ============================================
+  // EFFECTS
+  // ============================================
 
-  const sessionDuration = calculateDuration(session.startTime)
-  const finalAmount = calculateFinalAmount(session, formData.fnbAmount)
+  // Fetch attached F&B orders when dialog opens
+  useEffect(() => {
+    if (open && session) {
+      fetchAttachedFnbOrders()
+    }
+  }, [open, session])
+
+  // Reset form when dialog closes
+  useEffect(() => {
+    if (!open) {
+      setFormData({
+        paymentMethod: 'cash',
+        fnbAmount: 0,
+        notes: ''
+      })
+      setAttachedFnbOrders([])
+    }
+  }, [open])
 
   // ============================================
   // HANDLERS
   // ============================================
 
+  const fetchAttachedFnbOrders = async (): Promise<void> => {
+    if (!session) return
+
+    setFetchingFnb(true)
+    try {
+      const response = await fetch(`/api/fnb/orders?sessionId=${session.id}`, {
+        headers: {
+          'X-Location-ID': locationId
+        }
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        if (result.success && result.data) {
+          setAttachedFnbOrders(result.data)
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching F&B orders:', error)
+      // Don't show error toast as this is not critical
+    } finally {
+      setFetchingFnb(false)
+    }
+  }
+
   const handleSubmit = async (): Promise<void> => {
+    if (!session) return
+
     if (formData.fnbAmount < 0) {
       toast.error('F&B amount cannot be negative')
       return
@@ -169,14 +250,6 @@ export function StopSessionDialog({
 
       if (result.success) {
         toast.success(`Session stopped for ${session.unitName}`)
-        
-        // Reset form
-        setFormData({
-          paymentMethod: 'cash',
-          fnbAmount: 0,
-          notes: ''
-        })
-        
         onOpenChange(false)
         onSuccess?.()
       } else {
@@ -191,13 +264,19 @@ export function StopSessionDialog({
   }
 
   const handleCancel = (): void => {
-    setFormData({
-      paymentMethod: 'cash',
-      fnbAmount: 0,
-      notes: ''
-    })
     onOpenChange(false)
   }
+
+  // ============================================
+  // CALCULATIONS
+  // ============================================
+
+  if (!session) return null
+
+  const sessionDuration = calculateDuration(session.startTime)
+  const sessionCosts = calculateSessionCost(session, hourlyRate)
+  const totalAttachedFnb = attachedFnbOrders.reduce((sum, order) => sum + order.totalAmount, 0)
+  const finalTotal = sessionCosts.totalCost + totalAttachedFnb + formData.fnbAmount
 
   // ============================================
   // RENDER
@@ -205,7 +284,7 @@ export function StopSessionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center">
             <StopCircle className="w-5 h-5 mr-2" />
@@ -219,7 +298,15 @@ export function StopSessionDialog({
         <div className="space-y-4">
           {/* Session Summary */}
           <div className="bg-gray-50 p-4 rounded-lg space-y-3">
-            <h4 className="font-medium text-gray-900">Session Summary</h4>
+            <div className="flex items-center justify-between">
+              <h4 className="font-medium text-gray-900">Session Summary</h4>
+              {session.isOvertime && (
+                <Badge variant="destructive" className="text-xs">
+                  <AlertTriangle className="w-3 h-3 mr-1" />
+                  Overtime
+                </Badge>
+              )}
+            </div>
             
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div>
@@ -244,25 +331,67 @@ export function StopSessionDialog({
                 </p>
               </div>
             </div>
-
-            {session.isOvertime && (
-              <div className="bg-red-50 border border-red-200 p-3 rounded-lg">
-                <p className="text-red-800 text-sm font-medium">
-                  ⚠️ Session is in overtime - additional charges may apply
-                </p>
-              </div>
-            )}
           </div>
 
-          <Separator />
+          {/* F&B Orders */}
+          {fetchingFnb ? (
+            <div className="bg-blue-50 p-4 rounded-lg">
+              <div className="flex items-center">
+                <Coffee className="w-4 h-4 mr-2 text-blue-600" />
+                <span className="text-sm text-blue-700">Loading F&B orders...</span>
+              </div>
+            </div>
+          ) : attachedFnbOrders.length > 0 ? (
+            <div className="bg-blue-50 p-4 rounded-lg space-y-3">
+              <div className="flex items-center">
+                <ShoppingBag className="w-4 h-4 mr-2 text-blue-600" />
+                <h4 className="font-medium text-blue-900">Attached F&B Orders</h4>
+              </div>
+              
+              <div className="space-y-2">
+                {attachedFnbOrders.map((order) => (
+                  <div key={order.id} className="bg-white p-3 rounded border">
+                    <div className="flex justify-between items-start mb-2">
+                      <span className="text-sm font-medium">Order #{order.id.slice(-6)}</span>
+                      <span className="text-sm font-bold text-blue-600">
+                        {formatCurrency(order.totalAmount)}
+                      </span>
+                    </div>
+                    <div className="space-y-1">
+                      {order.items.map((item) => (
+                        <div key={item.id} className="flex justify-between text-xs text-gray-600">
+                          <span>{item.quantity}x {item.name}</span>
+                          <span>{formatCurrency(item.totalPrice)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                
+                <div className="flex justify-between items-center pt-2 border-t">
+                  <span className="text-sm font-medium text-blue-900">Total F&B Attached:</span>
+                  <span className="text-sm font-bold text-blue-600">
+                    {formatCurrency(totalAttachedFnb)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-gray-50 p-3 rounded-lg">
+              <div className="flex items-center text-gray-600">
+                <Coffee className="w-4 h-4 mr-2" />
+                <span className="text-sm">No F&B orders attached to this session</span>
+              </div>
+            </div>
+          )}
 
           {/* Payment Method */}
           <div className="space-y-2">
-            <Label htmlFor="payment">Payment Method</Label>
+            <Label>Payment Method</Label>
             <Select 
               value={formData.paymentMethod} 
-              onValueChange={(value: string) => 
-                setFormData(prev => ({ ...prev, paymentMethod: value as 'cash' | 'card' | 'digital_wallet' }))
+              onValueChange={(value: 'cash' | 'card' | 'digital_wallet') => 
+                setFormData(prev => ({ ...prev, paymentMethod: value }))
               }
             >
               <SelectTrigger>
@@ -291,9 +420,9 @@ export function StopSessionDialog({
             </Select>
           </div>
 
-          {/* F&B Amount */}
+          {/* Additional F&B Amount */}
           <div className="space-y-2">
-            <Label htmlFor="fnb">F&B Amount (Optional)</Label>
+            <Label htmlFor="fnb">Additional F&B Amount (Optional)</Label>
             <div className="relative">
               <Input
                 id="fnb"
@@ -310,7 +439,7 @@ export function StopSessionDialog({
               <Coffee className="w-4 h-4 absolute left-2.5 top-3 text-gray-400" />
             </div>
             <p className="text-xs text-gray-500">
-              Add F&B charges if customer ordered food & beverages
+              Add manual F&B charges not in the attached orders
             </p>
           </div>
 
@@ -330,39 +459,56 @@ export function StopSessionDialog({
 
           <Separator />
 
-          {/* Final Amount */}
+          {/* Payment Breakdown */}
           <div className="bg-green-50 p-4 rounded-lg space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Session Total:</span>
-              <span className="text-sm font-medium">
-                {formatCurrency(session.totalAmount || 0)}
-              </span>
+            <h4 className="font-medium text-green-900 mb-3">Payment Breakdown</h4>
+            
+            <div className="space-y-1 text-sm">
+              {/* Session Cost */}
+              <div className="flex items-center justify-between">
+                <span className="text-gray-600">Session ({session.billingModel}):</span>
+                <span className="font-medium">
+                  {formatCurrency(sessionCosts.baseCost)}
+                </span>
+              </div>
+              
+              {/* Overtime if any */}
+              {sessionCosts.overtimeCost > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-red-600">Overtime:</span>
+                  <span className="font-medium text-red-600">
+                    {formatCurrency(sessionCosts.overtimeCost)}
+                  </span>
+                </div>
+              )}
+              
+              {/* Attached F&B */}
+              {totalAttachedFnb > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600">F&B (Attached):</span>
+                  <span className="font-medium">
+                    {formatCurrency(totalAttachedFnb)}
+                  </span>
+                </div>
+              )}
+              
+              {/* Manual F&B */}
+              {formData.fnbAmount > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600">F&B (Additional):</span>
+                  <span className="font-medium">
+                    {formatCurrency(formData.fnbAmount)}
+                  </span>
+                </div>
+              )}
             </div>
-            
-            {formData.fnbAmount > 0 && (
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">F&B:</span>
-                <span className="text-sm font-medium">
-                  {formatCurrency(formData.fnbAmount)}
-                </span>
-              </div>
-            )}
-            
-            {session.isOvertime && (
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-red-600">Overtime:</span>
-                <span className="text-sm font-medium text-red-600">
-                  {formatCurrency(finalAmount - (session.totalAmount || 0) - formData.fnbAmount)}
-                </span>
-              </div>
-            )}
             
             <Separator />
             
             <div className="flex items-center justify-between">
-              <span className="font-medium text-gray-900">Final Total:</span>
+              <span className="font-medium text-green-900">Final Total:</span>
               <span className="text-lg font-bold text-green-600">
-                {formatCurrency(finalAmount)}
+                {formatCurrency(finalTotal)}
               </span>
             </div>
           </div>
