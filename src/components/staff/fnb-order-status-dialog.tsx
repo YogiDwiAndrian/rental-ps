@@ -19,7 +19,6 @@ import {
 } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Separator } from '@/components/ui/separator'
 import { Badge } from '@/components/ui/badge'
 import { 
   Coffee, 
@@ -27,15 +26,13 @@ import {
   CheckCircle2, 
   XCircle,
   RefreshCw,
-  ChefHat,
-  AlertTriangle,
-  CreditCard
+  AlertTriangle
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCurrency } from '@/lib/utils'
 
 // ============================================
-// TYPES
+// TYPES (SIMPLIFIED)
 // ============================================
 
 interface FnbOrderItem {
@@ -50,7 +47,7 @@ interface FnbOrder {
   id: string
   items: FnbOrderItem[]
   totalAmount: number
-  status: 'pending' | 'preparing' | 'ready' | 'served' | 'cancelled'
+  status: 'pending' | 'completed' | 'cancelled'
   paymentTiming: 'immediate' | 'end_of_session'
   rentalSessionId?: string
   customerName?: string
@@ -74,15 +71,13 @@ interface StatusUpdateFormData {
 }
 
 // ============================================
-// UTILS
+// UTILS (SIMPLIFIED)
 // ============================================
 
 const getStatusColor = (status: FnbOrder['status']) => {
   const statusColors = {
     pending: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-    preparing: 'bg-blue-100 text-blue-800 border-blue-200',
-    ready: 'bg-green-100 text-green-800 border-green-200',
-    served: 'bg-gray-100 text-gray-800 border-gray-200',
+    completed: 'bg-green-100 text-green-800 border-green-200',
     cancelled: 'bg-red-100 text-red-800 border-red-200'
   }
   return statusColors[status] || statusColors.pending
@@ -92,12 +87,8 @@ const getStatusIcon = (status: FnbOrder['status']) => {
   switch (status) {
     case 'pending':
       return <Clock className="w-4 h-4" />
-    case 'preparing':
-      return <ChefHat className="w-4 h-4" />
-    case 'ready':
+    case 'completed':
       return <CheckCircle2 className="w-4 h-4" />
-    case 'served':
-      return <Coffee className="w-4 h-4" />
     case 'cancelled':
       return <XCircle className="w-4 h-4" />
     default:
@@ -108,9 +99,7 @@ const getStatusIcon = (status: FnbOrder['status']) => {
 const getStatusLabel = (status: FnbOrder['status']) => {
   const statusLabels = {
     pending: 'Pending',
-    preparing: 'Preparing',
-    ready: 'Ready to Serve',
-    served: 'Served',
+    completed: 'Completed',
     cancelled: 'Cancelled'
   }
   return statusLabels[status] || status
@@ -119,12 +108,8 @@ const getStatusLabel = (status: FnbOrder['status']) => {
 const getAvailableTransitions = (currentStatus: FnbOrder['status']): FnbOrder['status'][] => {
   switch (currentStatus) {
     case 'pending':
-      return ['preparing', 'cancelled']
-    case 'preparing':
-      return ['ready', 'cancelled']
-    case 'ready':
-      return ['served', 'cancelled']
-    case 'served':
+      return ['completed', 'cancelled']
+    case 'completed':
       return ['cancelled'] // For refund scenarios
     case 'cancelled':
       return [] // No transitions from cancelled
@@ -157,7 +142,7 @@ export function FnbOrderStatusDialog({
   const availableStatuses = getAvailableTransitions(order.status)
   const isStatusChangePossible = availableStatuses.length > 0
   const isCancellation = formData.newStatus === 'cancelled'
-  const isPaid = order.paymentTiming === 'immediate' || order.status === 'served'
+  const isPaid = order.paymentTiming === 'immediate' || order.status === 'completed'
 
   // ============================================
   // HANDLERS
@@ -199,7 +184,7 @@ export function FnbOrderStatusDialog({
         throw new Error(data.error || 'Failed to update order status')
       }
 
-      toast.success(`Order status updated to ${getStatusLabel(formData.newStatus)}`)
+      toast.success(`Order ${getStatusLabel(formData.newStatus).toLowerCase()}!`)
       onSuccess?.()
       onOpenChange(false)
 
@@ -234,7 +219,7 @@ export function FnbOrderStatusDialog({
             F&B Order Status
           </DialogTitle>
           <DialogDescription>
-            Update order status and manage F&B order lifecycle
+            Update order status for this F&B order
           </DialogDescription>
         </DialogHeader>
 
@@ -320,38 +305,30 @@ export function FnbOrderStatusDialog({
                 <div className="space-y-3 p-3 border border-red-200 rounded-lg bg-red-50">
                   <div className="flex items-center">
                     <AlertTriangle className="w-4 h-4 text-red-600 mr-2" />
-                    <span className="text-sm font-medium text-red-800">Cancellation Options</span>
+                    <Label className="text-red-700 font-medium">Cancellation Details</Label>
                   </div>
                   
                   <div className="space-y-2">
-                    <Label className="text-sm">Reason for Cancellation</Label>
-                    <Select 
-                      value={formData.reason} 
-                      onValueChange={(value) => setFormData(prev => ({ ...prev, reason: value }))}
-                    >
-                      <SelectTrigger className="h-9">
-                        <SelectValue placeholder="Select reason" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="not_prepared">Not Prepared Yet</SelectItem>
-                        <SelectItem value="prepared_not_served">Prepared but Not Served</SelectItem>
-                        <SelectItem value="customer_request">Customer Request</SelectItem>
-                        <SelectItem value="out_of_stock">Out of Stock</SelectItem>
-                        <SelectItem value="kitchen_error">Kitchen Error</SelectItem>
-                        <SelectItem value="other">Other</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <Label htmlFor="reason" className="text-red-700">Reason (Required)</Label>
+                    <Textarea
+                      id="reason"
+                      placeholder="Why is this order being cancelled?"
+                      value={formData.reason}
+                      onChange={(e) => setFormData(prev => ({ ...prev, reason: e.target.value }))}
+                      rows={2}
+                      className="border-red-200"
+                    />
                   </div>
 
                   <div className="flex items-center space-x-2">
                     <input
-                      id="restoreStock"
                       type="checkbox"
+                      id="restoreStock"
                       checked={formData.restoreStock}
                       onChange={(e) => setFormData(prev => ({ ...prev, restoreStock: e.target.checked }))}
                       className="rounded"
                     />
-                    <Label htmlFor="restoreStock" className="text-sm">
+                    <Label htmlFor="restoreStock" className="text-sm text-red-700">
                       Restore stock quantities
                     </Label>
                   </div>

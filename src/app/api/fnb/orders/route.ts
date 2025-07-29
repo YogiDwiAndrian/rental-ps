@@ -32,7 +32,7 @@ interface CreatedOrderResponse {
     totalPrice: number
   }>
   totalAmount: number
-  status: string
+  status: 'pending' | 'completed'
   paymentTiming: string
   rentalSessionId?: string
   notes?: string
@@ -201,17 +201,26 @@ export async function POST(request: NextRequest) {
 
     // ===== CREATE ORDER IN TRANSACTION =====
     const result = await prisma.$transaction(async (tx) => {
-      // Create F&B Order
+      // Create F&B Order with simplified status logic
+      const initialStatus = body.payment_timing === 'immediate' ? 'completed' : 'pending'
+      
       const fnbOrder = await tx.fnbOrder.create({
         data: {
           rentalSessionId: body.rental_session_id || null,
           totalAmount: numberToDecimal(totalOrderAmount),
-          status: 'pending' // Default status for new orders
+          status: initialStatus
         }
       })
 
       // Create Order Items and Update Stock
-      const createdOrderItems = []
+      const createdOrderItems: Array<{
+        id: string
+        fnbItemId: string
+        fnbItemName: string
+        quantity: number
+        unitPrice: number
+        totalPrice: number
+      }> = []
       
       for (const orderItem of orderItems) {
         // Create order item
@@ -258,12 +267,6 @@ export async function POST(request: NextRequest) {
             description: body.notes || `F&B Order - ${createdOrderItems.length} items`
           }
         })
-
-        // Update order status to completed for immediate payment
-        await tx.fnbOrder.update({
-          where: { id: fnbOrder.id },
-          data: { status: 'completed' }
-        })
       }
 
       return {
@@ -277,7 +280,7 @@ export async function POST(request: NextRequest) {
       orderId: result.fnbOrder.id,
       items: result.createdOrderItems,
       totalAmount: totalOrderAmount,
-      status: result.fnbOrder.status,
+      status: result.fnbOrder.status as 'pending' | 'completed',
       paymentTiming: body.payment_timing,
       rentalSessionId: body.rental_session_id,
       notes: body.notes,

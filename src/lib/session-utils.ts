@@ -1,9 +1,121 @@
 // src/lib/session-utils.ts
 import { BillingType } from '@prisma/client'
-import { SessionCalculation, BillingCalculation, SessionValidation } from '@/types/session'
 
 // ============================================
-// SESSION CALCULATION UTILITIES
+// TYPES FOR SESSION CALCULATIONS
+// ============================================
+
+interface SessionCalculation {
+  durationMinutes: number
+  durationFormatted: string
+  totalAmount: number
+  isOvertime: boolean
+  overtimeMinutes?: number
+}
+
+interface BillingCalculation {
+  billingModel: BillingType
+  baseRate: number
+  duration: number
+  amount: number
+  breakdown: {
+    baseAmount: number
+    extensionAmount: number
+    totalAmount: number
+  }
+}
+
+interface SessionValidation {
+  isValid: boolean
+  errors: string[]
+  warnings: string[]
+}
+
+// ============================================
+// TYPES FOR F&B INTEGRATION
+// ============================================
+
+interface FnbOrderItem {
+  id: string
+  fnbItemName: string
+  quantity: number
+  unitPrice: number
+  totalPrice: number
+}
+
+interface FnbOrder {
+  id: string
+  items: FnbOrderItem[]
+  totalAmount: number
+  status: 'pending' | 'completed' | 'cancelled'
+  paymentTiming: 'immediate' | 'end_of_session'
+  createdAt: string
+}
+
+interface BillingRate {
+  id: string
+  billingType: BillingType
+  pricePerMinute?: number
+  pricePerHour: number
+  packagePrice?: number
+  timeLimit?: number
+}
+
+interface SessionWithFnbCalculation {
+  sessionCost: number
+  fnbCost: number
+  totalCost: number
+  paidAmount: number
+  remainingAmount: number
+  breakdown: {
+    session: {
+      durationMinutes: number
+      billingType: BillingType
+      baseRate: number
+      calculatedCost: number
+    }
+    fnb: {
+      totalOrders: number
+      totalAmount: number
+      paidAmount: number
+      unpaidAmount: number
+      unpaidOrders: FnbOrder[]
+    }
+  }
+}
+
+interface SessionReceipt {
+  sessionDetails: {
+    unitName: string
+    customerName?: string
+    startTime: string
+    endTime: string
+    duration: string
+    billingType: BillingType
+    sessionCost: number
+  }
+  fnbOrders: Array<{
+    orderId: string
+    items: Array<{
+      name: string
+      quantity: number
+      unitPrice: number
+      totalPrice: number
+    }>
+    totalAmount: number
+    status: string
+  }>
+  payment: {
+    subtotal: number
+    fnbSubtotal: number
+    totalAmount: number
+    paymentMethod: string
+    paidAt: string
+  }
+}
+
+// ============================================
+// EXISTING SESSION CALCULATION UTILITIES
 // ============================================
 
 /**
@@ -106,6 +218,213 @@ export function calculateBillingAmount(
   }
 }
 
+// ============================================
+// NEW: F&B INTEGRATION UTILITIES
+// ============================================
+
+/**
+ * Calculate session cost using billing rates (NEW)
+ */
+export function calculateSessionCost(
+  startTime: Date,
+  endTime: Date,
+  billingType: BillingType,
+  billingRates: BillingRate[]
+): number {
+  const durationMinutes = Math.floor((endTime.getTime() - startTime.getTime()) / (1000 * 60))
+  
+  switch (billingType) {
+    case 'timer':
+      const timerRate = billingRates.find(rate => 
+        rate.billingType === 'timer' && 
+        (!rate.timeLimit || durationMinutes <= rate.timeLimit)
+      )
+      return timerRate ? (timerRate.pricePerMinute || 0) * durationMinutes : 0
+
+    case 'hourly':
+      const hourlyRate = billingRates.find(rate => rate.billingType === 'hourly')
+      if (hourlyRate) {
+        const hours = Math.ceil(durationMinutes / 60)
+        return hourlyRate.pricePerHour * hours
+      }
+      return 0
+
+    case 'package':
+      const packageRate = billingRates.find(rate => 
+        rate.billingType === 'package' &&
+        (!rate.timeLimit || durationMinutes <= rate.timeLimit)
+      )
+      return packageRate ? (packageRate.packagePrice || packageRate.pricePerHour) : 0
+
+    case 'hybrid':
+      const packageLimit = billingRates.find(rate => rate.billingType === 'package')
+      const hourlyFallback = billingRates.find(rate => rate.billingType === 'hourly')
+      
+      if (packageLimit && hourlyFallback) {
+        const packageTimeLimit = packageLimit.timeLimit || 0
+        if (durationMinutes <= packageTimeLimit) {
+          return packageLimit.packagePrice || packageLimit.pricePerHour
+        } else {
+          const extraMinutes = durationMinutes - packageTimeLimit
+          const extraHours = Math.ceil(extraMinutes / 60)
+          return (packageLimit.packagePrice || packageLimit.pricePerHour) + 
+                 (hourlyFallback.pricePerHour * extraHours)
+        }
+      }
+      return 0
+
+    default:
+      return 0
+  }
+}
+
+/**
+ * Get unpaid F&B orders from session (NEW)
+ */
+export function getUnpaidFnbOrders(fnbOrders: FnbOrder[]): FnbOrder[] {
+  return fnbOrders.filter(order => 
+    order.status === 'pending' && 
+    order.paymentTiming === 'end_of_session'
+  )
+}
+
+/**
+ * Calculate total F&B cost from orders (NEW)
+ */
+export function getFnbOrdersTotal(
+  fnbOrders: FnbOrder[],
+  includeOnlyUnpaid: boolean = false
+): { totalAmount: number; paidAmount: number; unpaidAmount: number } {
+  let totalAmount = 0
+  let paidAmount = 0
+  let unpaidAmount = 0
+
+  fnbOrders.forEach(order => {
+    if (order.status === 'cancelled') return
+
+    totalAmount += order.totalAmount
+
+    if (order.paymentTiming === 'immediate' || order.status === 'completed') {
+      paidAmount += order.totalAmount
+    } else {
+      unpaidAmount += order.totalAmount
+    }
+  })
+
+  return {
+    totalAmount: includeOnlyUnpaid ? unpaidAmount : totalAmount,
+    paidAmount,
+    unpaidAmount
+  }
+}
+
+/**
+ * Calculate complete session with F&B integration (NEW)
+ */
+export function calculateSessionWithFnb(
+  startTime: Date,
+  endTime: Date,
+  billingType: BillingType,
+  billingRates: BillingRate[],
+  fnbOrders: FnbOrder[]
+): SessionWithFnbCalculation {
+  // Calculate session cost
+  const sessionCost = calculateSessionCost(startTime, endTime, billingType, billingRates)
+  const durationMinutes = Math.floor((endTime.getTime() - startTime.getTime()) / (1000 * 60))
+
+  // Calculate F&B costs
+  const fnbTotals = getFnbOrdersTotal(fnbOrders)
+  const unpaidOrders = getUnpaidFnbOrders(fnbOrders)
+
+  // Calculate totals
+  const totalCost = sessionCost + fnbTotals.unpaidAmount
+  const paidAmount = fnbTotals.paidAmount
+  const remainingAmount = Math.max(0, totalCost - paidAmount)
+
+  // Find base rate for breakdown
+  const baseRate = billingRates.find(rate => rate.billingType === billingType)?.pricePerHour || 0
+
+  return {
+    sessionCost,
+    fnbCost: fnbTotals.unpaidAmount,
+    totalCost,
+    paidAmount,
+    remainingAmount,
+    breakdown: {
+      session: {
+        durationMinutes,
+        billingType,
+        baseRate,
+        calculatedCost: sessionCost
+      },
+      fnb: {
+        totalOrders: fnbOrders.length,
+        totalAmount: fnbTotals.totalAmount,
+        paidAmount: fnbTotals.paidAmount,
+        unpaidAmount: fnbTotals.unpaidAmount,
+        unpaidOrders
+      }
+    }
+  }
+}
+
+/**
+ * Generate session receipt with F&B details (NEW)
+ */
+export function generateSessionReceipt(
+  sessionData: {
+    unitName: string
+    customerName?: string
+    startTime: Date
+    endTime: Date
+    billingType: BillingType
+    sessionCost: number
+  },
+  fnbOrders: FnbOrder[],
+  paymentData: {
+    totalAmount: number
+    paymentMethod: string
+    paidAt: Date
+  }
+): SessionReceipt {
+  const durationMinutes = Math.floor((sessionData.endTime.getTime() - sessionData.startTime.getTime()) / (1000 * 60))
+  const fnbTotals = getFnbOrdersTotal(fnbOrders)
+
+  return {
+    sessionDetails: {
+      unitName: sessionData.unitName,
+      customerName: sessionData.customerName,
+      startTime: sessionData.startTime.toISOString(),
+      endTime: sessionData.endTime.toISOString(),
+      duration: `${Math.floor(durationMinutes / 60)}h ${durationMinutes % 60}m`,
+      billingType: sessionData.billingType,
+      sessionCost: sessionData.sessionCost
+    },
+    fnbOrders: fnbOrders.map(order => ({
+      orderId: order.id,
+      items: order.items.map(item => ({
+        name: item.fnbItemName,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        totalPrice: item.totalPrice
+      })),
+      totalAmount: order.totalAmount,
+      status: order.status
+    })),
+    payment: {
+      subtotal: sessionData.sessionCost,
+      fnbSubtotal: fnbTotals.unpaidAmount,
+      totalAmount: paymentData.totalAmount,
+      paymentMethod: paymentData.paymentMethod,
+      paidAt: paymentData.paidAt.toISOString()
+    }
+  }
+}
+
+// ============================================
+// EXISTING UTILITIES (UNCHANGED)
+// ============================================
+
 /**
  * Format duration in minutes to human readable string
  */
@@ -174,10 +493,6 @@ export function getSessionStatus(
 
   return 'normal'
 }
-
-// ============================================
-// SESSION VALIDATION UTILITIES
-// ============================================
 
 /**
  * Validate session start request
@@ -276,202 +591,3 @@ export function validateSessionExtension(
     warnings
   }
 }
-
-// ============================================
-// PACKAGE UTILITIES - FULLY FLEXIBLE SYSTEM
-// ============================================
-
-import { PackageRate } from '@/types/package'
-
-/**
- * Get available packages for a unit (NEW: Fully flexible)
- */
-export function getAvailablePackages(packageRates: PackageRate[]): PackageRate[] {
-  return packageRates
-    .filter(pkg => pkg.isActive)
-    .sort((a, b) => a.displayOrder - b.displayOrder)
-}
-
-/**
- * Get package duration by ID (NEW: Dynamic from data)
- */
-export function getPackageDuration(packageRates: PackageRate[], packageId: string): number {
-  const packageRate = packageRates.find(pkg => pkg.id === packageId)
-  return packageRate?.duration || 60 // Default 1 hour if not found
-}
-
-/**
- * Get package price by ID (NEW: Dynamic from data)
- */
-export function getPackagePrice(packageRates: PackageRate[], packageId: string): number {
-  const packageRate = packageRates.find(pkg => pkg.id === packageId)
-  return packageRate?.price || 0
-}
-
-/**
- * Get package details by ID
- */
-export function getPackageDetails(packageRates: PackageRate[], packageId: string): PackageRate | null {
-  return packageRates.find(pkg => pkg.id === packageId) || null
-}
-
-/**
- * Validate package configuration
- */
-export function validatePackage(packageData: Omit<PackageRate, 'id' | 'createdAt' | 'updatedAt'>): { isValid: boolean; errors: string[] } {
-  const errors: string[] = []
-
-  // Validate name
-  if (!packageData.name?.trim()) {
-    errors.push('Package name is required')
-  } else if (packageData.name.length > 50) {
-    errors.push('Package name must be 50 characters or less')
-  }
-
-  // Validate duration
-  if (!packageData.duration || packageData.duration < 15) {
-    errors.push('Package duration must be at least 15 minutes')
-  } else if (packageData.duration > 1440) {
-    errors.push('Package duration cannot exceed 24 hours (1440 minutes)')
-  }
-
-  // Validate price
-  if (!packageData.price || packageData.price < 1000) {
-    errors.push('Package price must be at least Rp 1,000')
-  } else if (packageData.price > 10000000) {
-    errors.push('Package price cannot exceed Rp 10,000,000')
-  }
-
-  // Validate description length
-  if (packageData.description && packageData.description.length > 200) {
-    errors.push('Package description must be 200 characters or less')
-  }
-
-  return {
-    isValid: errors.length === 0,
-    errors
-  }
-}
-
-/**
- * Calculate package savings compared to hourly rate
- */
-export function calculatePackageSavings(packageRate: PackageRate, hourlyRate: number): {
-  hourlyEquivalent: number
-  savings: number
-  savingsPercent: number
-} {
-  const hours = packageRate.duration / 60
-  const hourlyEquivalent = Math.ceil(hours * hourlyRate)
-  const savings = Math.max(0, hourlyEquivalent - packageRate.price)
-  const savingsPercent = hourlyEquivalent > 0 ? Math.round((savings / hourlyEquivalent) * 100) : 0
-
-  return {
-    hourlyEquivalent,
-    savings,
-    savingsPercent
-  }
-}
-
-/**
- * Format package duration for display
- */
-export function formatPackageDuration(durationMinutes: number): string {
-  if (durationMinutes < 60) {
-    return `${durationMinutes} minutes`
-  }
-  
-  const hours = Math.floor(durationMinutes / 60)
-  const minutes = durationMinutes % 60
-  
-  if (minutes === 0) {
-    return hours === 1 ? '1 hour' : `${hours} hours`
-  }
-  
-  return `${hours}h ${minutes}m`
-}
-
-/**
- * Generate suggested package ID from name
- */
-export function generatePackageId(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, '') // Remove special characters
-    .replace(/\s+/g, '_') // Replace spaces with underscores
-    .substring(0, 20) // Limit length
-}
-
-// ============================================
-// PACKAGE UTILITIES - FULLY FLEXIBLE SYSTEM
-// ============================================
-
-/**
- * Check if package rates array is valid (MOVED TO session-utils)
- */
-export function validatePackageRatesArray(packageRates: unknown): packageRates is PackageRate[] {
-  if (!Array.isArray(packageRates)) return false
-  
-  return packageRates.every(pkg => 
-    typeof pkg === 'object' &&
-    pkg !== null &&
-    typeof pkg.id === 'string' &&
-    typeof pkg.name === 'string' &&
-    typeof pkg.duration === 'number' &&
-    typeof pkg.price === 'number' &&
-    typeof pkg.isActive === 'boolean' &&
-    typeof pkg.displayOrder === 'number'
-  )
-}
-
-/**
- * Convert PackageRate[] to JSON-safe format for Prisma
- */
-export function packageRatesToJson(packageRates: PackageRate[]): Record<string, unknown>[] {
-  return packageRates.map(pkg => ({
-    id: pkg.id,
-    name: pkg.name,
-    duration: pkg.duration,
-    price: pkg.price,
-    description: pkg.description || null,
-    isActive: pkg.isActive,
-    displayOrder: pkg.displayOrder,
-    createdAt: pkg.createdAt || new Date().toISOString(),
-    updatedAt: pkg.updatedAt || new Date().toISOString()
-  }))
-}
-
-/**
- * Convert JSON data from Prisma to PackageRate[]
- */
-export function jsonToPackageRates(jsonData: unknown): PackageRate[] {
-  if (!validatePackageRatesArray(jsonData)) {
-    return []
-  }
-  return jsonData as PackageRate[]
-}
-
-// ============================================
-// CURRENCY UTILITIES
-// ============================================
-
-/**
- * Format currency for display
- */
-export function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('id-ID', {
-    style: 'currency',
-    currency: 'IDR',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0
-  }).format(amount)
-}
-
-/**
- * Format currency without symbol
- */
-export function formatAmount(amount: number): string {
-  return new Intl.NumberFormat('id-ID').format(amount)
-}
-
-

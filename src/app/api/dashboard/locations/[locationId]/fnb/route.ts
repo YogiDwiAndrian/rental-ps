@@ -5,7 +5,7 @@ import { prisma } from '@/lib/prisma'
 import { Decimal } from '@prisma/client/runtime/library'
 
 // ============================================
-// TYPES
+// TYPES (SIMPLIFIED)
 // ============================================
 
 interface FnbItem {
@@ -39,7 +39,7 @@ interface FnbOrder {
   id: string
   items: FnbOrderItem[]
   totalAmount: number
-  status: string
+  status: 'pending' | 'completed' | 'cancelled'
   paymentTiming: 'immediate' | 'end_of_session'
   rentalSessionId?: string
   customerName?: string
@@ -139,214 +139,171 @@ export async function GET(
 
     // ===== DATA FETCHING =====
 
-    // 1. Fetch F&B Categories and Items
-    const categoriesData = await prisma.fnbCategory.findMany({
+    // 1. Fetch F&B Categories with Items
+    const categories = await prisma.fnbCategory.findMany({
       where: {
         locationId: locationId,
-        location: {
-          tenantId: user.tenant.id
-        },
         isActive: true
       },
       include: {
         fnbItems: {
-          where: {
-            isActive: true
-          },
-          orderBy: {
-            name: 'asc'
-          }
+          where: { isActive: true },
+          orderBy: { displayOrder: 'asc' }
         }
       },
-      orderBy: [
-        { displayOrder: 'asc' },
-        { name: 'asc' }
-      ]
+      orderBy: { displayOrder: 'asc' }
     })
 
-    // 2. Fetch Recent Orders (last 10 orders from today)
-    const startOfDay = getStartOfDay()
-    const endOfDay = getEndOfDay()
-
-    const ordersData = await prisma.fnbOrder.findMany({
+    // 2. Recent F&B Orders (last 50 orders)
+    const recentOrdersData = await prisma.fnbOrder.findMany({
       where: {
-        createdAt: {
-          gte: startOfDay,
-          lte: endOfDay
-        },
-        // Filter by location through rental session or direct location association
-        OR: [
-          {
-            rentalSession: {
+        fnbOrderItems: {
+          some: {
+            fnbItem: {
               locationId: locationId
             }
-          },
-          {
-            // For standalone orders, we need to add locationId to FnbOrder model
-            // For now, filter through fnbOrderItems -> fnbItem -> locationId
-            fnbOrderItems: {
-              some: {
-                fnbItem: {
-                  locationId: locationId
-                }
-              }
-            }
           }
-        ]
+        }
       },
       include: {
         fnbOrderItems: {
           include: {
             fnbItem: {
               select: {
+                id: true,
                 name: true
               }
             }
           }
         },
         rentalSession: {
-          select: {
-            id: true,
+          include: {
             unit: {
               select: {
                 customerDisplayName: true
               }
             }
           }
+        },
+        transactions: {
+          select: {
+            paymentStatus: true
+          },
+          take: 1
         }
       },
-      orderBy: {
-        createdAt: 'desc'
-      },
-      take: 10
+      orderBy: { createdAt: 'desc' },
+      take: 50
     })
 
-    // 3. Calculate Today's Stats
-    const todayOrdersCount = await prisma.fnbOrder.count({
-      where: {
-        createdAt: {
-          gte: startOfDay,
-          lte: endOfDay
-        },
-        status: {
-          not: 'cancelled'
-        },
-        OR: [
-          {
-            rentalSession: {
-              locationId: locationId
-            }
+    // 3. Today's Statistics
+    const startOfDay = getStartOfDay()
+    const endOfDay = getEndOfDay()
+
+    const [todayOrdersCount, todayRevenue, pendingOrdersCount] = await Promise.all([
+      // Total orders today
+      prisma.fnbOrder.count({
+        where: {
+          createdAt: {
+            gte: startOfDay,
+            lte: endOfDay
           },
-          {
-            fnbOrderItems: {
-              some: {
-                fnbItem: {
-                  locationId: locationId
-                }
+          fnbOrderItems: {
+            some: {
+              fnbItem: {
+                locationId: locationId
               }
             }
           }
-        ]
-      }
-    })
+        }
+      }),
 
-    const todayRevenue = await prisma.fnbOrder.aggregate({
-      where: {
-        createdAt: {
-          gte: startOfDay,
-          lte: endOfDay
+      // Total revenue today
+      prisma.fnbOrder.aggregate({
+        _sum: {
+          totalAmount: true
         },
-        status: {
-          not: 'cancelled'
-        },
-        OR: [
-          {
-            rentalSession: {
-              locationId: locationId
-            }
+        where: {
+          createdAt: {
+            gte: startOfDay,
+            lte: endOfDay
           },
-          {
-            fnbOrderItems: {
-              some: {
-                fnbItem: {
-                  locationId: locationId
-                }
+          status: { not: 'cancelled' },
+          fnbOrderItems: {
+            some: {
+              fnbItem: {
+                locationId: locationId
               }
             }
           }
-        ]
-      },
-      _sum: {
-        totalAmount: true
-      }
-    })
+        }
+      }),
 
-    const pendingOrdersCount = await prisma.fnbOrder.count({
-      where: {
-        status: {
-          in: ['pending', 'preparing', 'ready']
-        },
-        OR: [
-          {
-            rentalSession: {
-              locationId: locationId
-            }
-          },
-          {
-            fnbOrderItems: {
-              some: {
-                fnbItem: {
-                  locationId: locationId
-                }
+      // Pending orders count
+      prisma.fnbOrder.count({
+        where: {
+          status: 'pending',
+          fnbOrderItems: {
+            some: {
+              fnbItem: {
+                locationId: locationId
               }
             }
           }
-        ]
-      }
-    })
+        }
+      })
+    ])
 
-    // ===== DATA TRANSFORMATION =====
+    // ===== TRANSFORM DATA =====
 
     // Transform categories and items
-    const categories: FnbCategory[] = categoriesData.map(category => ({
+    const transformedCategories: FnbCategory[] = categories.map(category => ({
       id: category.id,
       name: category.name,
       items: category.fnbItems.map(item => ({
         id: item.id,
         name: item.name,
         description: item.description || undefined,
-        price: decimalToNumber(item.sellingPrice), // Note: using sellingPrice not price
+        price: decimalToNumber(item.sellingPrice),
         stockQuantity: item.stockQuantity,
         minStockAlert: item.minStockAlert,
         unitType: item.unitType,
         categoryName: category.name,
-        isAvailable: item.isActive && item.stockQuantity > 0
+        isAvailable: item.stockQuantity > 0
       }))
     }))
 
     // Transform recent orders
-    const recentOrders: FnbOrder[] = ordersData.map(order => ({
-      id: order.id,
-      items: order.fnbOrderItems.map(item => ({
-        id: item.id,
-        fnbItemId: item.fnbItemId,
-        fnbItemName: item.fnbItem.name,
-        quantity: item.quantity,
-        unitPrice: decimalToNumber(item.unitPrice),
-        totalPrice: decimalToNumber(item.totalPrice)
-      })),
-      totalAmount: decimalToNumber(order.totalAmount),
-      status: order.status,
-      paymentTiming: 'immediate', // Default since schema doesn't have this field yet
-      rentalSessionId: order.rentalSessionId || undefined,
-      customerName: order.rentalSession?.unit?.customerDisplayName || undefined,
-      notes: undefined, // Schema doesn't have notes field yet
-      createdAt: order.createdAt.toISOString()
-    }))
+    const recentOrders: FnbOrder[] = recentOrdersData.map(order => {
+      // Determine payment timing
+      const hasImmediateTransaction = order.transactions.some(t => t.paymentStatus === 'paid')
+      const paymentTiming: 'immediate' | 'end_of_session' = hasImmediateTransaction 
+        ? 'immediate' 
+        : 'end_of_session'
+
+      return {
+        id: order.id,
+        items: order.fnbOrderItems.map(item => ({
+          id: item.id,
+          fnbItemId: item.fnbItemId,
+          fnbItemName: item.fnbItem.name,
+          quantity: item.quantity,
+          unitPrice: decimalToNumber(item.unitPrice),
+          totalPrice: decimalToNumber(item.totalPrice)
+        })),
+        totalAmount: decimalToNumber(order.totalAmount),
+        status: order.status as 'pending' | 'completed' | 'cancelled',
+        paymentTiming: paymentTiming,
+        rentalSessionId: order.rentalSessionId || undefined,
+        customerName: order.rentalSession?.unit?.customerDisplayName || undefined,
+        notes: undefined, // Schema doesn't have notes field yet
+        createdAt: order.createdAt.toISOString()
+      }
+    })
 
     // Find low stock items
     const lowStockItems: FnbItem[] = []
-    categories.forEach(category => {
+    transformedCategories.forEach(category => {
       category.items.forEach(item => {
         if (item.stockQuantity <= item.minStockAlert && item.stockQuantity > 0) {
           lowStockItems.push(item)
@@ -363,7 +320,7 @@ export async function GET(
 
     // ===== RESPONSE =====
     const responseData: FnbDashboardData = {
-      categories,
+      categories: transformedCategories,
       recentOrders,
       lowStockItems,
       todayStats
