@@ -1,25 +1,51 @@
-// src/components/staff/create-fnb-order-dialog.tsx - FIXED SIMPLE & COMPLETE
+// src/components/staff/create-fnb-order-dialog.tsx - ORIGINAL + MINIMAL FIXES
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogDescription, 
+  DialogFooter, 
+  DialogHeader, 
+  DialogTitle 
+} from '@/components/ui/dialog'
+import { 
+  Select, 
+  SelectContent, 
+  SelectItem, 
+  SelectTrigger, 
+  SelectValue 
+} from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { Separator } from '@/components/ui/separator'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Checkbox } from '@/components/ui/checkbox'
 import { 
-  Coffee, Utensils, Plus, Minus, ShoppingCart, CreditCard, Banknote, 
-  Smartphone, CheckCircle2, Package, Clock, RefreshCw, X, Search, Trash2, User
+  Coffee, 
+  Utensils, 
+  Plus, 
+  Minus,
+  ShoppingCart,
+  CreditCard, 
+  Banknote, 
+  Smartphone,
+  AlertCircle,
+  CheckCircle2,
+  Package,
+  Clock,
+  Timer,
+  RefreshCw // ADD: Only add this icon
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { cn } from '@/lib/utils'
 
 // ============================================
-// TYPES
+// TYPES - ORIGINAL + ADD refreshSessions prop
 // ============================================
 
 interface FnbItem {
@@ -57,6 +83,15 @@ interface ActiveSession {
   startTime: string
 }
 
+interface CreateFnbOrderDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  locationId: string
+  activeSessions: ActiveSession[]
+  onSuccess?: () => void
+  refreshSessions?: () => Promise<void> // ADD: Only add this prop
+}
+
 interface OrderFormData {
   items: OrderItem[]
   attachToSession: boolean
@@ -66,35 +101,31 @@ interface OrderFormData {
   notes: string
 }
 
-interface CreateFnbOrderDialogProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  locationId: string
-  activeSessions: ActiveSession[]
-  onSuccess?: () => void
-  refreshSessions?: () => Promise<void>
-}
-
 // ============================================
-// UTILITIES
+// UTILS - ORIGINAL UNCHANGED
 // ============================================
 
 const formatCurrency = (amount: number): string => {
   return new Intl.NumberFormat('id-ID', {
     style: 'currency',
-    currency: 'IDR'
+    currency: 'IDR',
+    minimumFractionDigits: 0
   }).format(amount)
 }
 
-const formatDateTime = (dateString: string): string => {
-  return new Date(dateString).toLocaleTimeString('id-ID', {
-    hour: '2-digit',
-    minute: '2-digit'
-  })
+const getCategoryIcon = (categoryName: string) => {
+  const name = categoryName.toLowerCase()
+  if (name.includes('drink') || name.includes('beverage') || name.includes('minuman')) {
+    return <Coffee className="w-4 h-4 text-blue-600" />
+  }
+  if (name.includes('food') || name.includes('makanan') || name.includes('main')) {
+    return <Utensils className="w-4 h-4 text-orange-600" />
+  }
+  return <Package className="w-4 h-4 text-green-600" />
 }
 
 // ============================================
-// MAIN COMPONENT
+// COMPONENT - ORIGINAL + ADD refreshSessions support
 // ============================================
 
 export function CreateFnbOrderDialog({
@@ -102,16 +133,14 @@ export function CreateFnbOrderDialog({
   onOpenChange,
   locationId,
   activeSessions,
-  onSuccess,
-  refreshSessions
+  refreshSessions, // ADD: Optional prop
+  onSuccess
 }: CreateFnbOrderDialogProps) {
-  // State
   const [categories, setCategories] = useState<FnbCategory[]>([])
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [selectedCategory, setSelectedCategory] = useState<string>('all')
-  const [searchTerm, setSearchTerm] = useState('')
-  const [refreshingSessions, setRefreshingSessions] = useState(false)
+  const [selectedCategory, setSelectedCategory] = useState<string>('')
+  const [refreshingSessions, setRefreshingSessions] = useState(false) // ADD: Loading state
   
   const [formData, setFormData] = useState<OrderFormData>({
     items: [],
@@ -122,19 +151,29 @@ export function CreateFnbOrderDialog({
     notes: ''
   })
 
-  // Data fetching
+  // ============================================
+  // DATA FETCHING - ORIGINAL + ADD auto refresh
+  // ============================================
+
   const fetchFnbItems = useCallback(async () => {
     try {
       setLoading(true)
+      
       const response = await fetch(`/api/dashboard/locations/${locationId}/fnb-items`, {
-        headers: { 'X-Location-ID': locationId }
+        headers: {
+          'X-Location-ID': locationId
+        }
       })
 
-      if (!response.ok) throw new Error(`Failed to fetch F&B items: ${response.statusText}`)
+      if (!response.ok) {
+        throw new Error(`Failed to fetch F&B items: ${response.statusText}`)
+      }
+
       const data = await response.json()
       
       if (data.success) {
         setCategories(data.data.categories || [])
+        // Set 'all' to show all categories by default
         setSelectedCategory('all')
       } else {
         throw new Error(data.error || 'Failed to load F&B items')
@@ -147,15 +186,15 @@ export function CreateFnbOrderDialog({
     }
   }, [locationId])
 
+  // ADD: Function to refresh sessions
   const handleRefreshSessions = async () => {
     if (!refreshSessions) return
+    
     try {
       setRefreshingSessions(true)
       await refreshSessions()
-      toast.success('Sessions refreshed')
     } catch (error) {
       console.error('Error refreshing sessions:', error)
-      toast.error('Failed to refresh sessions')
     } finally {
       setRefreshingSessions(false)
     }
@@ -164,10 +203,14 @@ export function CreateFnbOrderDialog({
   useEffect(() => {
     if (open) {
       fetchFnbItems()
-      if (refreshSessions) handleRefreshSessions()
+      // ADD: Auto-refresh sessions when dialog opens
+      if (refreshSessions) {
+        handleRefreshSessions()
+      }
     }
   }, [open, fetchFnbItems])
 
+  // Reset form when dialog closes
   useEffect(() => {
     if (!open) {
       setFormData({
@@ -179,42 +222,56 @@ export function CreateFnbOrderDialog({
         notes: ''
       })
       setSelectedCategory('all')
-      setSearchTerm('')
     }
   }, [open])
 
-  // Form actions
-  const addItemToOrder = (fnbItem: FnbItem) => {
-    const existingItem = formData.items.find(item => item.fnbItemId === fnbItem.id)
-    
-    if (existingItem) {
-      if (existingItem.quantity >= fnbItem.stockQuantity) {
-        toast.error(`Maximum available: ${fnbItem.stockQuantity} ${fnbItem.unitType}`)
-        return
-      }
-      
-      setFormData(prev => ({
-        ...prev,
-        items: prev.items.map(item =>
-          item.fnbItemId === fnbItem.id
-            ? { ...item, quantity: item.quantity + 1, totalPrice: (item.quantity + 1) * item.unitPrice }
-            : item
-        )
-      }))
-    } else {
-      const newOrderItem: OrderItem = {
-        fnbItemId: fnbItem.id,
-        fnbItemName: fnbItem.name,
-        quantity: 1,
-        unitPrice: fnbItem.price,
-        totalPrice: fnbItem.price,
-        categoryName: fnbItem.categoryName,
-        unitType: fnbItem.unitType,
-        maxQuantity: fnbItem.stockQuantity
-      }
-      
-      setFormData(prev => ({ ...prev, items: [...prev.items, newOrderItem] }))
+  // ============================================
+  // ITEM MANAGEMENT - ORIGINAL UNCHANGED
+  // ============================================
+
+  const addItemToOrder = (item: FnbItem) => {
+    if (!item.isAvailable || item.stockQuantity <= 0) {
+      toast.error(`${item.name} is not available`)
+      return
     }
+
+    setFormData(prev => {
+      const existingItemIndex = prev.items.findIndex(orderItem => orderItem.fnbItemId === item.id)
+      
+      if (existingItemIndex >= 0) {
+        // Item already exists, increase quantity
+        const existingItem = prev.items[existingItemIndex]
+        const newQuantity = existingItem.quantity + 1
+        
+        if (newQuantity > item.stockQuantity) {
+          toast.error(`Maximum available: ${item.stockQuantity} ${item.unitType}`)
+          return prev
+        }
+        
+        const updatedItems = [...prev.items]
+        updatedItems[existingItemIndex] = {
+          ...existingItem,
+          quantity: newQuantity,
+          totalPrice: newQuantity * existingItem.unitPrice
+        }
+        
+        return { ...prev, items: updatedItems }
+      } else {
+        // New item, add to cart
+        const newOrderItem: OrderItem = {
+          fnbItemId: item.id,
+          fnbItemName: item.name,
+          quantity: 1,
+          unitPrice: item.price,
+          totalPrice: item.price,
+          categoryName: item.categoryName,
+          unitType: item.unitType,
+          maxQuantity: item.stockQuantity
+        }
+        
+        return { ...prev, items: [...prev.items, newOrderItem] }
+      }
+    })
   }
 
   const updateItemQuantity = (fnbItemId: string, newQuantity: number) => {
@@ -230,10 +287,15 @@ export function CreateFnbOrderDialog({
             toast.error(`Maximum available: ${item.maxQuantity} ${item.unitType}`)
             return item
           }
-          return { ...item, quantity: newQuantity, totalPrice: newQuantity * item.unitPrice }
+          return {
+            ...item,
+            quantity: newQuantity,
+            totalPrice: newQuantity * item.unitPrice
+          }
         }
         return item
       })
+      
       return { ...prev, items: updatedItems }
     })
   }
@@ -245,34 +307,19 @@ export function CreateFnbOrderDialog({
     }))
   }
 
-  const clearCart = () => {
-    setFormData(prev => ({ ...prev, items: [] }))
-  }
+  // ============================================
+  // CALCULATIONS - ORIGINAL UNCHANGED
+  // ============================================
 
-  // Calculations
   const totalAmount = formData.items.reduce((sum, item) => sum + item.totalPrice, 0)
   const totalItems = formData.items.reduce((sum, item) => sum + item.quantity, 0)
 
-  // Filtering
-  const filteredItems = (() => {
-    let items = selectedCategory === 'all' 
-      ? categories.flatMap(cat => cat.items)
-      : categories.find(cat => cat.id === selectedCategory)?.items || []
+  // ============================================
+  // FORM HANDLERS - FIX: Use camelCase field names
+  // ============================================
 
-    if (searchTerm.trim()) {
-      items = items.filter(item => 
-        item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.description?.toLowerCase().includes(searchTerm.toLowerCase())
-      )
-    }
-
-    return items.filter(item => item.isAvailable)
-  })()
-
-  const availableCategories = categories.filter(cat => cat.items.some(item => item.isAvailable))
-
-  // Form submission
   const handleSubmitOrder = async () => {
+    // Validation
     if (formData.items.length === 0) {
       toast.error('Please add at least one item to the order')
       return
@@ -286,14 +333,15 @@ export function CreateFnbOrderDialog({
     try {
       setSubmitting(true)
 
+      // FIX: Use camelCase field names that backend expects
       const requestBody = {
         items: formData.items.map(item => ({
-          fnbItemId: item.fnbItemId,
+          fnbItemId: item.fnbItemId, // FIX: Use camelCase
           quantity: item.quantity
         })),
-        rentalSessionId: formData.attachToSession ? formData.selectedSessionId : undefined,
-        paymentTiming: formData.paymentTiming,
-        paymentMethod: formData.paymentMethod,
+        rentalSessionId: formData.attachToSession ? formData.selectedSessionId : undefined, // FIX: Use camelCase
+        paymentTiming: formData.paymentTiming, // FIX: Use camelCase
+        paymentMethod: formData.paymentMethod, // FIX: Use camelCase
         notes: formData.notes.trim() || undefined
       }
 
@@ -324,384 +372,402 @@ export function CreateFnbOrderDialog({
     }
   }
 
+  // ============================================
+  // RENDER HELPERS - ORIGINAL UNCHANGED
+  // ============================================
+
+  // Get items to display - all items if 'all' selected, filtered if specific category selected
+  const availableItems = selectedCategory === 'all' || selectedCategory === ''
+    ? categories.reduce((allItems: FnbItem[], category) => {
+        const categoryItems = category.items.filter(item => item.isAvailable && item.stockQuantity > 0)
+        return [...allItems, ...categoryItems]
+      }, [])
+    : (categories.find(cat => cat.id === selectedCategory)?.items.filter(item => item.isAvailable && item.stockQuantity > 0) || [])
+
+  const getPaymentTimingInfo = () => {
+    if (formData.attachToSession) {
+      return formData.paymentTiming === 'immediate' 
+        ? 'Payment will be processed now'
+        : 'Payment will be added to session bill'
+    }
+    return 'Standalone order - payment required now'
+  }
+
+  // ============================================
+  // RENDER - ORIGINAL + ADD refresh button only
+  // ============================================
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl w-[95vw] h-[90vh] p-0 gap-0">
-        <DialogHeader className="px-6 py-4 border-b">
-          <DialogTitle className="text-xl font-semibold">Create F&B Order</DialogTitle>
-          <DialogDescription>
-            Add items to create a new F&B order. You can attach it to an active rental session.
+      <DialogContent className="max-w-[95vw] md:max-w-4xl h-[95vh] md:h-[90vh] flex flex-col p-0">
+        <DialogHeader className="p-4 md:p-6 pb-4 border-b">
+          <DialogTitle className="flex items-center text-lg md:text-xl">
+            <ShoppingCart className="w-5 h-5 mr-2" />
+            Create F&B Order
+          </DialogTitle>
+          <DialogDescription className="text-sm">
+            Add food & beverage items to create a new order
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col lg:flex-row h-[calc(90vh-120px)]">
-          {/* LEFT PANEL - MENU */}
-          <div className="flex-1 flex flex-col border-b lg:border-b-0 lg:border-r">
-            {/* Search & Filter */}
-            <div className="p-4 border-b bg-gray-50">
-              <div className="flex gap-3 mb-3">
-                <div className="flex-1 relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <Input
-                    placeholder="Search items..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={fetchFnbItems}
-                  disabled={loading}
-                >
-                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                </Button>
+        {/* Scrollable Content Area - ORIGINAL UNCHANGED */}
+        <div className="flex-1 overflow-hidden p-4 md:p-6">
+          <div className="h-full flex flex-col lg:grid lg:grid-cols-3 gap-4 md:gap-6">
+            
+            {/* Left Panel - F&B Items - ORIGINAL UNCHANGED */}
+            <div className="lg:col-span-2 flex flex-col space-y-4 order-1 lg:order-1">
+              {/* Category Filter */}
+              <div className="space-y-2">
+                <Label>Category</Label>
+                <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">
+                      <div className="flex items-center">
+                        <Package className="w-4 h-4 mr-2" />
+                        All Categories
+                      </div>
+                    </SelectItem>
+                    {categories.map((category) => (
+                      <SelectItem key={category.id} value={category.id}>
+                        <div className="flex items-center">
+                          {getCategoryIcon(category.name)}
+                          <span className="ml-2">{category.name}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant={selectedCategory === 'all' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setSelectedCategory('all')}
-                >
-                  <Package className="w-4 h-4 mr-2" />
-                  All
-                </Button>
-                {availableCategories.map((category) => (
-                  <Button
-                    key={category.id}
-                    variant={selectedCategory === category.id ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setSelectedCategory(category.id)}
-                  >
-                    {category.name === 'Makanan' ? (
-                      <Utensils className="w-4 h-4 mr-2" />
-                    ) : (
-                      <Coffee className="w-4 h-4 mr-2" />
-                    )}
-                    {category.name}
-                  </Button>
-                ))}
-              </div>
-            </div>
-
-            {/* Items Grid */}
-            <ScrollArea className="flex-1 p-4">
-              {loading ? (
-                <div className="flex items-center justify-center h-48">
-                  <RefreshCw className="w-8 h-8 animate-spin text-gray-400" />
-                  <span className="ml-3 text-gray-500">Loading items...</span>
-                </div>
-              ) : filteredItems.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-48 text-gray-500">
-                  <Package className="w-12 h-12 mb-4" />
-                  <p className="font-medium">No items available</p>
-                  {searchTerm && <p className="text-sm">Try adjusting your search</p>}
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {filteredItems.map((item) => {
-                    const orderItem = formData.items.find(oi => oi.fnbItemId === item.id)
-                    const isInCart = !!orderItem
-                    
-                    return (
-                      <Card 
-                        key={item.id} 
-                        className={`cursor-pointer transition-all hover:shadow-lg ${
-                          isInCart ? 'ring-2 ring-blue-500' : 'hover:scale-105'
-                        }`}
-                        onClick={() => addItemToOrder(item)}
-                      >
-                        <CardContent className="p-4">
-                          <div className="flex justify-between items-start mb-3">
-                            <h4 className="font-semibold text-sm leading-tight flex-1 pr-2">
-                              {item.name}
-                            </h4>
-                            {isInCart && (
-                              <Badge variant="default" className="text-sm">
-                                {orderItem.quantity}
-                              </Badge>
+              {/* F&B Items Grid */}
+              <div className="flex-1 min-h-0">
+                {loading ? (
+                  <div className="flex items-center justify-center h-40">
+                    <div className="text-center">
+                      <Package className="w-8 h-8 mx-auto text-gray-400 mb-2" />
+                      <p className="text-sm text-gray-500">Loading F&B items...</p>
+                    </div>
+                  </div>
+                ) : availableItems.length === 0 ? (
+                  <div className="flex items-center justify-center h-40">
+                    <div className="text-center">
+                      <AlertCircle className="w-8 h-8 mx-auto text-gray-400 mb-2" />
+                      <p className="text-sm text-gray-500">
+                        {selectedCategory !== 'all' && selectedCategory ? 'No items available in this category' : 'No F&B items available'}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <ScrollArea className="h-[400px] lg:h-full">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {availableItems.map((item) => {
+                        const orderItem = formData.items.find(oi => oi.fnbItemId === item.id)
+                        const isInCart = !!orderItem
+                        
+                        return (
+                          <Card 
+                            key={item.id} 
+                            className={cn(
+                              "cursor-pointer transition-all hover:shadow-md",
+                              isInCart && "ring-2 ring-green-500 bg-green-50"
                             )}
-                          </div>
-                          
-                          {item.description && (
-                            <p className="text-sm text-gray-600 mb-3 line-clamp-2">
-                              {item.description}
-                            </p>
-                          )}
-                          
-                          <div className="flex justify-between items-center">
-                            <div>
-                              <p className="font-bold text-blue-600">
-                                {formatCurrency(item.price)}
-                              </p>
-                              <p className="text-sm text-gray-500">
-                                Stock: {item.stockQuantity} {item.unitType}
-                              </p>
-                            </div>
-                            
-                            <Button 
-                              size="sm"
-                              variant={isInCart ? "default" : "outline"}
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                addItemToOrder(item)
-                              }}
-                            >
-                              <Plus className="w-4 h-4 mr-1" />
-                              Add
-                            </Button>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    )
-                  })}
-                </div>
-              )}
-            </ScrollArea>
-          </div>
-
-          {/* RIGHT PANEL - CART */}
-          <div className="w-full lg:w-96 flex flex-col bg-gray-50">
-            {/* Cart Header */}
-            <div className="p-4 border-b bg-white">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center">
-                  <ShoppingCart className="w-5 h-5 mr-2 text-blue-600" />
-                  <h3 className="font-semibold">Cart</h3>
-                  {totalItems > 0 && (
-                    <Badge variant="secondary" className="ml-2">
-                      {totalItems}
-                    </Badge>
-                  )}
-                </div>
-                {formData.items.length > 0 && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={clearCart}
-                    className="text-red-600 hover:text-red-700"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
+                            onClick={() => addItemToOrder(item)}
+                          >
+                            <CardContent className="p-3">
+                              <div className="flex items-start justify-between">
+                                <div className="flex-1 min-w-0">
+                                  <h4 className="font-medium text-sm truncate">{item.name}</h4>
+                                  {item.description && (
+                                    <p className="text-xs text-gray-600 mt-1 line-clamp-2">
+                                      {item.description}
+                                    </p>
+                                  )}
+                                  <div className="flex items-center justify-between mt-2">
+                                    <span className="text-sm font-bold text-green-600">
+                                      {formatCurrency(item.price)}
+                                    </span>
+                                    <Badge variant="outline" className="text-xs">
+                                      {item.stockQuantity} {item.unitType}
+                                    </Badge>
+                                  </div>
+                                </div>
+                                
+                                {isInCart && (
+                                  <div className="ml-2 flex items-center">
+                                    <CheckCircle2 className="w-4 h-4 text-green-600" />
+                                  </div>
+                                )}
+                              </div>
+                            </CardContent>
+                          </Card>
+                        )
+                      })}
+                    </div>
+                  </ScrollArea>
                 )}
               </div>
             </div>
 
-            {/* Cart Items */}
-            <ScrollArea className="flex-1 p-4">
-              {formData.items.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-32 text-gray-500">
-                  <ShoppingCart className="w-8 h-8 mb-2" />
-                  <p className="font-medium">Cart is empty</p>
-                  <p className="text-sm">Add items from menu</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {formData.items.map((item) => (
-                    <Card key={item.fnbItemId} className="p-3">
-                      <div className="flex justify-between items-start mb-2">
-                        <div className="flex-1 pr-2">
-                          <h4 className="font-medium text-sm">{item.fnbItemName}</h4>
-                          <p className="text-xs text-gray-600">{item.categoryName}</p>
-                          <p className="text-sm font-semibold text-blue-600">
-                            {formatCurrency(item.totalPrice)}
-                          </p>
+            {/* Right Panel - Order Summary & Settings - ORIGINAL + ADD refresh button */}
+            <div className="flex flex-col min-h-0 order-2 lg:order-2">
+              <div className="flex-1 overflow-y-auto">
+                <div className="space-y-3 md:space-y-4 pr-2 pb-6">
+                  
+                  {/* Order Items - ORIGINAL UNCHANGED */}
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm flex items-center justify-between">
+                        <div className="flex items-center">
+                          <ShoppingCart className="w-4 h-4 mr-2" />
+                          Order ({totalItems} items)
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removeItemFromOrder(item.fnbItemId)}
-                          className="text-red-600 hover:text-red-700 p-1"
-                        >
-                          <X className="w-3 h-3" />
-                        </Button>
-                      </div>
-                      
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-6 w-6 p-0"
-                            onClick={() => updateItemQuantity(item.fnbItemId, item.quantity - 1)}
-                          >
-                            <Minus className="w-3 h-3" />
-                          </Button>
-                          <span className="text-sm font-medium w-8 text-center">
-                            {item.quantity}
-                          </span>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-6 w-6 p-0"
-                            onClick={() => updateItemQuantity(item.fnbItemId, item.quantity + 1)}
-                            disabled={item.quantity >= item.maxQuantity}
-                          >
-                            <Plus className="w-3 h-3" />
-                          </Button>
+                        <div className="text-sm font-semibold text-green-600">
+                          {formatCurrency(totalAmount)}
                         </div>
-                        <div className="text-xs text-gray-500">
-                          {formatCurrency(item.unitPrice)} each
-                        </div>
-                      </div>
-                    </Card>
-                  ))}
-                </div>
-              )}
-            </ScrollArea>
-
-            {/* Order Options */}
-            {formData.items.length > 0 && (
-              <div className="p-4 border-t bg-white space-y-4">
-                {/* Total */}
-                <div className="flex justify-between items-center text-lg font-bold border-2 border-blue-200 bg-blue-50 p-3 rounded-lg">
-                  <span>Total:</span>
-                  <span className="text-blue-600">{formatCurrency(totalAmount)}</span>
-                </div>
-
-                {/* Session Attachment */}
-                <div className="space-y-3">
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="attachToSession"
-                      checked={formData.attachToSession}
-                      onCheckedChange={(checked) => setFormData(prev => ({
-                        ...prev,
-                        attachToSession: checked as boolean,
-                        paymentTiming: (checked as boolean) ? 'end_of_session' : 'immediate'
-                      }))}
-                    />
-                    <Label htmlFor="attachToSession" className="text-sm font-medium">
-                      Attach to rental session
-                    </Label>
-                  </div>
-
-                  {formData.attachToSession && (
-                    <div className="space-y-2 pl-6">
-                      <div className="flex items-center justify-between">
-                        <Label className="text-xs">Select Session:</Label>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={handleRefreshSessions}
-                          disabled={refreshingSessions}
-                          className="h-auto p-1"
-                        >
-                          <RefreshCw className={`w-3 h-3 ${refreshingSessions ? 'animate-spin' : ''}`} />
-                        </Button>
-                      </div>
-                      
-                      <Select
-                        value={formData.selectedSessionId}
-                        onValueChange={(value) => setFormData(prev => ({ ...prev, selectedSessionId: value }))}
-                      >
-                        <SelectTrigger className="text-sm">
-                          <SelectValue placeholder="Choose session..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {activeSessions.length === 0 ? (
-                            <div className="p-3 text-sm text-gray-500 text-center">
-                              No active sessions found
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3 pt-0">
+                      {formData.items.length > 0 ? (
+                        <div className="space-y-2">
+                          <div className="max-h-[120px] md:max-h-[150px] overflow-y-auto border rounded">
+                            <div className="space-y-2 p-2">
+                              {formData.items.map((item) => (
+                                <div key={item.fnbItemId} className="flex items-center justify-between p-2 border rounded bg-gray-50">
+                                  <div className="flex-1 min-w-0">
+                                    <p className="font-medium text-sm truncate">{item.fnbItemName}</p>
+                                    <p className="text-xs text-gray-600">
+                                      {formatCurrency(item.unitPrice)} × {item.quantity}
+                                    </p>
+                                  </div>
+                                  
+                                  <div className="flex items-center space-x-1 ml-2">
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-6 w-6 p-0 hover:bg-gray-200"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        updateItemQuantity(item.fnbItemId, item.quantity - 1)
+                                      }}
+                                    >
+                                      <Minus className="w-3 h-3" />
+                                    </Button>
+                                    <span className="text-sm font-medium w-6 text-center">{item.quantity}</span>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-6 w-6 p-0 hover:bg-gray-200"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        updateItemQuantity(item.fnbItemId, item.quantity + 1)
+                                      }}
+                                    >
+                                      <Plus className="w-3 h-3" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              ))}
                             </div>
-                          ) : (
-                            activeSessions.map((session) => (
-                              <SelectItem key={session.id} value={session.id}>
-                                <div className="flex items-center space-x-2">
-                                  <User className="w-3 h-3" />
-                                  <span>{session.unitName}</span>
-                                  <Badge variant="outline" className="text-xs">
-                                    <Clock className="w-2 h-2 mr-1" />
-                                    {formatDateTime(session.startTime)}
-                                  </Badge>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-center py-4 text-gray-500">
+                          <ShoppingCart className="w-8 h-8 mx-auto mb-2 text-gray-400" />
+                          <p className="text-sm">Cart is empty</p>
+                          <p className="text-xs">Click items to add them</p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* Session & Payment Settings - ORIGINAL + ADD refresh button */}
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm">Order Settings</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      
+                      {/* Attach to Session */}
+                      <div className="space-y-3">
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="attachToSession"
+                            checked={formData.attachToSession}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              attachToSession: e.target.checked,
+                              paymentTiming: e.target.checked ? 'end_of_session' : 'immediate'
+                            }))}
+                            className="rounded"
+                          />
+                          <Label htmlFor="attachToSession" className="text-sm">
+                            Attach to rental session
+                          </Label>
+                        </div>
+
+                        {formData.attachToSession && (
+                          <div className="space-y-3">
+                            <div>
+                              {/* ADD: Refresh button */}
+                              <div className="flex items-center justify-between mb-2">
+                                <Label className="text-sm">Select Session</Label>
+                                {refreshSessions && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-6 px-2"
+                                    onClick={handleRefreshSessions}
+                                    disabled={refreshingSessions}
+                                  >
+                                    <RefreshCw className={cn("w-3 h-3", refreshingSessions && "animate-spin")} />
+                                  </Button>
+                                )}
+                              </div>
+                              <Select 
+                                value={formData.selectedSessionId} 
+                                onValueChange={(value) => setFormData(prev => ({ ...prev, selectedSessionId: value }))}
+                              >
+                                <SelectTrigger className="h-9">
+                                  <SelectValue placeholder="Choose session" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {activeSessions.length === 0 ? (
+                                    <div className="p-2 text-sm text-gray-500">
+                                      No active sessions
+                                    </div>
+                                  ) : (
+                                    activeSessions.map((session) => (
+                                      <SelectItem key={session.id} value={session.id}>
+                                        <div className="flex items-center">
+                                          <Timer className="w-3 h-3 mr-2" />
+                                          <span className="truncate">{session.unitName}</span>
+                                          {session.customerName && (
+                                            <span className="ml-1 text-gray-600 truncate">• {session.customerName}</span>
+                                          )}
+                                        </div>
+                                      </SelectItem>
+                                    ))
+                                  )}
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            {/* Payment Timing */}
+                            <div>
+                              <Label className="text-sm">Payment Timing</Label>
+                              <Select 
+                                value={formData.paymentTiming} 
+                                onValueChange={(value: 'immediate' | 'end_of_session') => 
+                                  setFormData(prev => ({ ...prev, paymentTiming: value }))
+                                }
+                              >
+                                <SelectTrigger className="h-9">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="immediate">Pay Now</SelectItem>
+                                  <SelectItem value="end_of_session">Pay at Session End</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <p className="text-xs text-gray-500 mt-1">
+                                {getPaymentTimingInfo()}
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Payment Method - ORIGINAL UNCHANGED */}
+                      {(!formData.attachToSession || formData.paymentTiming === 'immediate') && (
+                        <div>
+                          <Label className="text-sm">Payment Method</Label>
+                          <Select 
+                            value={formData.paymentMethod} 
+                            onValueChange={(value: 'cash' | 'card' | 'digital_wallet') => 
+                              setFormData(prev => ({ ...prev, paymentMethod: value }))
+                            }
+                          >
+                            <SelectTrigger className="h-9">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="cash">
+                                <div className="flex items-center">
+                                  <Banknote className="w-4 h-4 mr-2" />
+                                  Cash
                                 </div>
                               </SelectItem>
-                            ))
-                          )}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
-                </div>
-
-                {/* Payment Method */}
-                <div className="space-y-2">
-                  <Label className="text-sm">Payment Method:</Label>
-                  <Select
-                    value={formData.paymentMethod}
-                    onValueChange={(value: 'cash' | 'card' | 'digital_wallet') => 
-                      setFormData(prev => ({ ...prev, paymentMethod: value }))
-                    }
-                  >
-                    <SelectTrigger className="text-sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="cash">
-                        <div className="flex items-center">
-                          <Banknote className="w-3 h-3 mr-2" />
-                          Cash
+                              <SelectItem value="card">
+                                <div className="flex items-center">
+                                  <CreditCard className="w-4 h-4 mr-2" />
+                                  Card
+                                </div>
+                              </SelectItem>
+                              <SelectItem value="digital_wallet">
+                                <div className="flex items-center">
+                                  <Smartphone className="w-4 h-4 mr-2" />
+                                  Digital Wallet
+                                </div>
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
-                      </SelectItem>
-                      <SelectItem value="card">
-                        <div className="flex items-center">
-                          <CreditCard className="w-3 h-3 mr-2" />
-                          Card
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="digital_wallet">
-                        <div className="flex items-center">
-                          <Smartphone className="w-3 h-3 mr-2" />
-                          Digital Wallet
-                        </div>
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                      )}
 
-                {/* Notes */}
-                <div className="space-y-2">
-                  <Label className="text-sm">Notes (Optional):</Label>
-                  <Textarea
-                    placeholder="Special requests..."
-                    value={formData.notes}
-                    onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
-                    className="text-sm h-16 resize-none"
-                  />
-                </div>
-
-                {/* Action Buttons */}
-                <div className="flex space-x-2 pt-2">
-                  <Button 
-                    variant="outline" 
-                    onClick={() => onOpenChange(false)}
-                    className="flex-1"
-                  >
-                    Cancel
-                  </Button>
-                  <Button 
-                    onClick={handleSubmitOrder}
-                    disabled={submitting || formData.items.length === 0}
-                    className="flex-1"
-                  >
-                    {submitting ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                        Creating...
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle2 className="w-4 h-4 mr-2" />
-                        Create Order
-                      </>
-                    )}
-                  </Button>
+                      {/* Notes - ORIGINAL UNCHANGED */}
+                      <div className="space-y-2">
+                        <Label htmlFor="notes" className="text-sm font-medium">Notes (Optional)</Label>
+                        <Textarea
+                          id="notes"
+                          placeholder="Special instructions..."
+                          value={formData.notes}
+                          onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
+                          rows={3}
+                          className="text-sm resize-none"
+                        />
+                      </div>
+                    </CardContent>
+                  </Card>
                 </div>
               </div>
-            )}
+            </div>
           </div>
         </div>
+
+        {/* Fixed Footer - ORIGINAL UNCHANGED */}
+        <DialogFooter className="border-t p-4 md:p-6 pt-4 bg-white">
+          <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 w-full">
+            <Button 
+              variant="outline" 
+              onClick={() => onOpenChange(false)}
+              className="w-full sm:w-auto order-2 sm:order-1"
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleSubmitOrder}
+              disabled={submitting || formData.items.length === 0}
+              className="w-full sm:w-auto min-w-[120px] order-1 sm:order-2"
+            >
+              {submitting ? (
+                <div className="flex items-center justify-center">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Creating...
+                </div>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4 mr-2" />
+                  <span className="hidden sm:inline">Create Order </span>
+                  ({formatCurrency(totalAmount)})
+                </>
+              )}
+            </Button>
+          </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )
