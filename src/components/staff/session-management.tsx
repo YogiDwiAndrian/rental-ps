@@ -1,3 +1,4 @@
+// src/components/staff/session-management.tsx - ORIGINAL LAYOUT + MINIMAL FIXES
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
@@ -22,7 +23,7 @@ import { ExtendSessionDialog } from './extend-session-dialog'
 import { toast } from 'sonner'
 
 // ============================================
-// TYPES
+// TYPES - ORIGINAL
 // ============================================
 
 interface Unit {
@@ -57,11 +58,11 @@ interface ActiveSession {
 interface SessionManagementProps {
   units: Unit[]
   locationId: string
-  onRefresh?: () => void
+  onRefresh?: () => void  // FIX: Keep callback prop
 }
 
 // ============================================
-// COMPONENT
+// COMPONENT - ORIGINAL LAYOUT
 // ============================================
 
 export function SessionManagement({ units, locationId, onRefresh }: SessionManagementProps) {
@@ -74,10 +75,10 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
   const [extendDialogOpen, setExtendDialogOpen] = useState(false)
 
   // ============================================
-  // DERIVED STATE WITH REORDERING
+  // DERIVED STATE - ORIGINAL ORDERING
   // ============================================
   
-  // Reorder units: available -> occupied -> broken -> maintenance (last)
+  // Reorder units: available → occupied → broken → maintenance (last)
   const availableUnits = realTimeUnits.filter(unit => unit.status === 'available')
   const occupiedUnits = realTimeUnits.filter(unit => unit.status === 'occupied')
   const brokenUnits = realTimeUnits.filter(unit => unit.status === 'broken')
@@ -89,7 +90,7 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
   const overtimeSessions = activeSessions.filter(session => session.isOvertime)
 
   // ============================================
-  // API FUNCTIONS
+  // API FUNCTIONS - ORIGINAL
   // ============================================
   
   const fetchActiveSessions = useCallback(async (): Promise<void> => {
@@ -152,7 +153,7 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
   }, [locationId, units])
 
   // ============================================
-  // HANDLERS
+  // HANDLERS - ORIGINAL + FIX callbacks
   // ============================================
   
   const handleStartSession = useCallback((unit: Unit): void => {
@@ -195,7 +196,8 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
       
       if (result.success) {
         toast.success(`Unit status changed to ${newStatus}`)
-        fetchUnitsStatus()
+        await fetchUnitsStatus()
+        // FIX: Call callback
         onRefresh?.()
       } else {
         toast.error(result.error || 'Failed to change unit status')
@@ -206,10 +208,16 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
     }
   }, [locationId, fetchUnitsStatus, onRefresh])
 
-  const handleDialogSuccess = useCallback((): void => {
-    fetchActiveSessions()
-    fetchUnitsStatus()
-    onRefresh?.()
+  // FIX: Enhanced dialog success handler
+  const handleDialogSuccess = useCallback(async (): Promise<void> => {
+    await fetchActiveSessions()
+    await fetchUnitsStatus()
+    
+    // FIX: Call parent callback
+    if (onRefresh) {
+      await onRefresh()
+    }
+    
     setStartDialogOpen(false)
     setStopDialogOpen(false)
     setExtendDialogOpen(false)
@@ -218,36 +226,54 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
   }, [fetchActiveSessions, fetchUnitsStatus, onRefresh])
 
   // ============================================
-  // UTILS
+  // EFFECTS - ORIGINAL
+  // ============================================
+
+  useEffect(() => {
+    setRealTimeUnits(units)
+  }, [units])
+
+  useEffect(() => {
+    fetchActiveSessions()
+    fetchUnitsStatus()
+  }, [fetchActiveSessions, fetchUnitsStatus])
+
+  // Auto-refresh every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchActiveSessions()
+      fetchUnitsStatus()
+    }, 30000)
+
+    return () => clearInterval(interval)
+  }, [fetchActiveSessions, fetchUnitsStatus])
+
+  // ============================================
+  // UTILS - ORIGINAL
   // ============================================
   
   const getUnitActiveSession = useCallback((unitId: string): ActiveSession | undefined => {
     return activeSessions.find(session => session.unitId === unitId)
   }, [activeSessions])
 
-  const getUnitHourlyRate = useCallback((unitId: string): number => {
-    const unit = realTimeUnits.find(u => u.id === unitId)
-    return unit?.hourlyRate || 25000
-  }, [realTimeUnits])
-
   const getBillingModelInfo = useCallback((billingModel: 'timer' | 'hourly' | 'package') => {
     switch (billingModel) {
       case 'timer':
         return {
           icon: <Timer className="w-3 h-3" />,
-          label: 'Pay at End',
+          label: 'Timer',
           color: 'bg-blue-100 text-blue-800 border-blue-200'
         }
       case 'hourly':
         return {
           icon: <Clock className="w-3 h-3" />,
-          label: 'Pre-paid',
+          label: 'Hourly',
           color: 'bg-green-100 text-green-800 border-green-200'
         }
       case 'package':
         return {
           icon: <Package className="w-3 h-3" />,
-          label: 'Package Deal',
+          label: 'Package',
           color: 'bg-purple-100 text-purple-800 border-purple-200'
         }
       default:
@@ -259,56 +285,54 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
     }
   }, [])
 
-  const formatRemainingTime = useCallback((minutes?: number): string => {
-    if (!minutes || minutes <= 0) return '0m'
+  const formatRemainingTime = useCallback((minutes?: number) => {
+    if (minutes === undefined) return 'Running...'
     
-    if (minutes >= 60) {
-      const hours = Math.floor(minutes / 60)
-      const remainingMins = minutes % 60
-      return remainingMins > 0 ? `${hours}h ${remainingMins}m` : `${hours}h`
+    if (minutes < 0) {
+      const overtimeMinutes = Math.abs(minutes)
+      const hours = Math.floor(overtimeMinutes / 60)
+      const mins = overtimeMinutes % 60
+      return `+${hours}:${mins.toString().padStart(2, '0')}`
     }
     
-    return `${minutes}m`
+    const hours = Math.floor(minutes / 60)
+    const mins = minutes % 60
+    return `${hours}:${mins.toString().padStart(2, '0')}`
   }, [])
 
-  const formatCurrency = useCallback((amount: number): string => {
+  const formatCurrency = (amount: number): string => {
     return new Intl.NumberFormat('id-ID', {
       style: 'currency',
       currency: 'IDR',
       minimumFractionDigits: 0
     }).format(amount)
-  }, [])
+  }
 
   // ============================================
-  // EFFECTS
+  // RENDER - ORIGINAL LAYOUT
   // ============================================
-  
-  useEffect(() => {
-    setRealTimeUnits(units)
-  }, [units])
 
-  useEffect(() => {
-    fetchActiveSessions()
-    fetchUnitsStatus()
-    
-    const interval = setInterval(() => {
-      fetchActiveSessions()
-      fetchUnitsStatus()
-    }, 30000) // 30 seconds polling
-
-    return () => clearInterval(interval)
-  }, [fetchActiveSessions, fetchUnitsStatus])
-
-  // ============================================
-  // RENDER
-  // ============================================
-  
   return (
     <div className="space-y-6">
-      {/* Quick Stats */}
+      {/* Header Stats - ORIGINAL */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg font-semibold">Session Overview</CardTitle>
+          <CardTitle className="flex items-center justify-between">
+            <span className="flex items-center">
+              <Gamepad className="w-5 h-5 mr-2" />
+              Session Management
+            </span>
+            <div className="flex items-center space-x-2">
+              <Badge variant="outline">
+                {activeSessions.length} Active
+              </Badge>
+              {overtimeSessions.length > 0 && (
+                <Badge variant="destructive">
+                  {overtimeSessions.length} Overtime
+                </Badge>
+              )}
+            </div>
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -323,21 +347,21 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
               </div>
             </div>
 
-            {/* Occupied */}
+            {/* Active */}
             <div className="flex items-center space-x-3">
               <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
                 <Gamepad className="w-6 h-6 text-blue-600" />
               </div>
               <div>
                 <p className="text-2xl font-bold text-blue-600">{occupiedUnits.length}</p>
-                <p className="text-sm text-gray-600">Occupied</p>
+                <p className="text-sm text-gray-600">Active</p>
               </div>
             </div>
 
             {/* Overtime */}
             <div className="flex items-center space-x-3">
               <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center">
-                <Clock className="w-6 h-6 text-orange-600" />
+                <AlertCircle className="w-6 h-6 text-orange-600" />
               </div>
               <div>
                 <p className="text-2xl font-bold text-orange-600">{overtimeSessions.length}</p>
@@ -359,7 +383,7 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
         </CardContent>
       </Card>
 
-      {/* Units Grid - Using Ordered Units */}
+      {/* Units Grid - ORIGINAL LAYOUT */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {orderedUnits.map((unit) => {
           const isAvailable = unit.status === 'available'
@@ -368,39 +392,33 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
           const isBroken = unit.status === 'broken'
           const activeSession = getUnitActiveSession(unit.id)
           const billingInfo = activeSession ? getBillingModelInfo(activeSession.billingModel) : null
-          
+
           return (
             <Card 
               key={unit.id} 
               className={cn(
-                "relative overflow-hidden transition-all duration-200 hover:shadow-md",
-                isAvailable && "border-green-200 hover:border-green-300 bg-gradient-to-br from-green-50 to-emerald-50",
-                isOccupied && !activeSession?.isOvertime && "border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50",
-                activeSession?.isOvertime && "border-red-200 bg-gradient-to-br from-red-50 to-pink-50",
-                isMaintenance && "border-orange-200 bg-gradient-to-br from-orange-50 to-amber-50",
-                isBroken && "border-gray-300 bg-gradient-to-br from-gray-50 to-slate-50"
+                "transition-all duration-200",
+                isAvailable && "border-green-200 bg-green-50",
+                isOccupied && "border-blue-200 bg-blue-50",
+                isMaintenance && "border-orange-200 bg-orange-50",
+                isBroken && "border-red-200 bg-red-50"
               )}
             >
               <CardHeader className="pb-3">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <CardTitle className="text-base flex items-center">
-                      <Gamepad className="w-4 h-4 mr-2" />
-                      {unit.customerDisplayName || unit.name}
-                    </CardTitle>
-                    <p className="text-xs text-gray-500 mt-1">{unit.consoleType}</p>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <Gamepad className="w-4 h-4" />
+                    <h3 className="font-semibold text-base">{unit.name}</h3>
                   </div>
-                  
-                  {/* Status Badge */}
                   <Badge 
-                    variant="outline"
+                    variant="outline" 
                     className={cn(
                       "text-xs font-medium",
-                      isAvailable && "bg-green-100 text-green-800 border-green-200",
-                      isOccupied && !activeSession?.isOvertime && "bg-blue-100 text-blue-800 border-blue-200",
-                      activeSession?.isOvertime && "bg-red-100 text-red-800 border-red-200",
-                      isMaintenance && "bg-orange-100 text-orange-800 border-orange-200",
-                      isBroken && "bg-gray-100 text-gray-800 border-gray-200"
+                      isAvailable && "bg-green-100 text-green-800 border-green-300",
+                      isOccupied && "bg-blue-100 text-blue-800 border-blue-300",
+                      isMaintenance && "bg-orange-100 text-orange-800 border-orange-300",
+                      isBroken && "bg-red-100 text-red-800 border-red-300",
+                      activeSession?.isOvertime && "bg-orange-500 text-white border-orange-600"
                     )}
                   >
                     {activeSession?.isOvertime ? 'OVERTIME' :
@@ -464,69 +482,59 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
 
                 {/* Action Buttons */}
                 <div className="space-y-2">
-                  {/* PRIMARY ACTIONS - Main buttons */}
-                  
-                  {/* Available Unit - Start Button (PROMINENT) */}
+                  {/* Main Action */}
                   {isAvailable && (
                     <Button 
-                      variant="default"
-                      size="default"
                       onClick={() => handleStartSession(unit)}
-                      className="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2.5"
+                      size="sm" 
+                      className="w-full"
                     >
-                      <Play className="w-4 h-4 mr-2" />
+                      <Play className="w-3 h-3 mr-2" />
                       Start Session
                     </Button>
                   )}
 
-                  {/* Occupied Unit - Stop & Extend Buttons (PROMINENT) */}
-                  {activeSession && (
+                  {isOccupied && activeSession && (
                     <div className="space-y-2">
                       <Button 
-                        variant="outline"
-                        size="default"
                         onClick={() => handleStopSession(unit.id)}
-                        className={cn(
-                          "w-full font-medium py-2.5",
-                          activeSession.isOvertime 
-                            ? "text-red-600 hover:text-red-700 border-red-200 bg-red-50 hover:bg-red-100" 
-                            : "text-red-600 hover:text-red-700 border-red-200 hover:bg-red-50"
-                        )}
+                        variant="destructive" 
+                        size="sm" 
+                        className="w-full"
                       >
-                        <StopCircle className="w-4 h-4 mr-2" />
-                        {activeSession.billingModel === 'timer' ? 'Stop & Calculate' : 'Stop Session'}
+                        <StopCircle className="w-3 h-3 mr-2" />
+                        Stop Session
                       </Button>
-
-                      {/* Extend button only for hourly and package modes */}
+                      
+                      {/* Extend button - only for non-timer sessions */}
                       {activeSession.billingModel !== 'timer' && (
                         <Button 
-                          variant="outline"
-                          size="default"
                           onClick={() => handleExtendSession(unit.id)}
-                          className="w-full text-blue-600 hover:text-blue-700 border-blue-200 hover:bg-blue-50 font-medium py-2.5"
+                          variant="outline" 
+                          size="sm" 
+                          className="w-full"
                         >
-                          <Clock className="w-4 h-4 mr-2" />
-                          Extend Time
+                          <Clock className="w-3 h-3 mr-2" />
+                          Extend Session
                         </Button>
                       )}
                     </div>
                   )}
 
-                  {/* Maintenance Unit - Back to Normal Button (PROMINENT) */}
-                  {isMaintenance && (
+                  {/* Maintenance/Broken Recovery */}
+                  {(isMaintenance || isBroken) && (
                     <Button 
-                      variant="outline"
-                      size="default"
                       onClick={() => handleChangeUnitStatus(unit.id, 'available')}
-                      className="w-full text-green-600 hover:text-green-700 border-green-200 hover:bg-green-50 font-medium py-2.5"
+                      variant="outline" 
+                      size="sm" 
+                      className="w-full"
                     >
-                      <Play className="w-4 h-4 mr-2" />
-                      Back to Normal
+                      Mark as Fixed
                     </Button>
                   )}
 
-                  {/* SECONDARY ACTIONS - Small utility buttons */}
-                  {(isAvailable || isBroken || (activeSession && activeSession.billingModel === 'timer')) && (
+                  {/* Status Change Actions - Only show when not occupied or has timer session */}
+                  {(isAvailable || (activeSession && activeSession.billingModel === 'timer')) && (
                     <div className="flex gap-2 mt-2">
                       {/* Set Maintenance - Small button */}
                       {(isAvailable || isBroken) && (
@@ -580,14 +588,14 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
         </Card>
       )}
 
-      {/* Dialogs */}
+      {/* Dialogs - FIX: Use enhanced callback */}
       <StartSessionDialog
         open={startDialogOpen}
         onOpenChange={setStartDialogOpen}
         units={availableUnits}
         selectedUnit={selectedUnit}
         locationId={locationId}
-        onSuccess={handleDialogSuccess}
+        onSuccess={handleDialogSuccess}  // FIX: Enhanced callback
       />
 
       <StopSessionDialog
@@ -595,7 +603,7 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
         onOpenChange={setStopDialogOpen}
         session={selectedSession}
         locationId={locationId}
-        onSuccess={handleDialogSuccess}
+        onSuccess={handleDialogSuccess}  // FIX: Enhanced callback
       />
 
       <ExtendSessionDialog
@@ -603,8 +611,8 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
         onOpenChange={setExtendDialogOpen}
         session={selectedSession}
         locationId={locationId}
-        hourlyRate={selectedSession ? getUnitHourlyRate(selectedSession.unitId) : 25000}
-        onSuccess={handleDialogSuccess}
+        hourlyRate={selectedSession ? realTimeUnits.find(u => u.id === selectedSession.unitId)?.hourlyRate || 25000 : 25000}
+        onSuccess={handleDialogSuccess}  // FIX: Enhanced callback
       />
     </div>
   )

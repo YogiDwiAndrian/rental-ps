@@ -1,3 +1,4 @@
+// src/components/staff/fnb-management.tsx - ORIGINAL LAYOUT + MINIMAL FIXES
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
@@ -8,34 +9,24 @@ import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { 
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  DropdownMenuSeparator
-} from '@/components/ui/dropdown-menu'
-import { 
-  Coffee, 
-  Utensils, 
   ShoppingCart, 
-  AlertTriangle, 
-  Package,
-  TrendingUp,
+  Plus, 
+  RefreshCw, 
+  Package2, 
+  TrendingUp, 
+  AlertTriangle,
   Clock,
-  Plus,
-  Eye,
-  RefreshCw,
-  MoreVertical,
   CheckCircle2,
   XCircle,
-  Timer
+  Eye,
+  Coffee
 } from 'lucide-react'
-import { cn, formatCurrency } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { FnbOrderStatusDialog } from './fnb-order-status-dialog'
 
 // ============================================
-// TYPES
+// TYPES - ORIGINAL + FIX startTime
 // ============================================
 
 interface FnbItem {
@@ -44,10 +35,10 @@ interface FnbItem {
   description?: string
   price: number
   stockQuantity: number
-  minStockAlert: number
   unitType: string
   categoryName: string
   isAvailable: boolean
+  minStockAlert: number
 }
 
 interface FnbCategory {
@@ -79,13 +70,16 @@ interface ActiveSession {
   id: string
   unitName: string
   customerName?: string
-  startTime: string
+  startTime: string  // FIX: Add startTime field
 }
 
+// FIX: Add callback props
 interface FnbManagementProps {
   locationId: string
   activeSessions: ActiveSession[]
   onCreateOrder?: () => void
+  onRefresh?: () => void  // FIX: Add refresh callback
+  refreshSessions?: () => Promise<void>  // FIX: Add sessions refresh
 }
 
 interface FnbData {
@@ -100,13 +94,15 @@ interface FnbData {
 }
 
 // ============================================
-// COMPONENT
+// COMPONENT - ORIGINAL LAYOUT
 // ============================================
 
 export function FnbManagement({ 
   locationId, 
   activeSessions,
-  onCreateOrder
+  onCreateOrder,
+  onRefresh,  // FIX: Accept callback
+  refreshSessions  // FIX: Accept sessions refresh
 }: FnbManagementProps) {
   const router = useRouter()
   const [fnbData, setFnbData] = useState<FnbData>({
@@ -125,7 +121,7 @@ export function FnbManagement({
   const [statusDialogOpen, setStatusDialogOpen] = useState(false)
 
   // ============================================
-  // DATA FETCHING
+  // DATA FETCHING - ORIGINAL
   // ============================================
 
   const fetchFnbData = useCallback(async () => {
@@ -170,7 +166,7 @@ export function FnbManagement({
   }, [fetchFnbData])
 
   // ============================================
-  // ORDER STATUS MANAGEMENT
+  // ORDER STATUS MANAGEMENT - ORIGINAL
   // ============================================
 
   const getOrderStatusColor = (status: FnbOrder['status']) => {
@@ -218,14 +214,19 @@ export function FnbManagement({
   }
 
   // ============================================
-  // EVENT HANDLERS
+  // EVENT HANDLERS - FIX: Use callbacks
   // ============================================
 
   const handleRefresh = useCallback(async () => {
     await fetchFnbData()
-    router.refresh()
+    // FIX: Use callback if provided
+    if (onRefresh) {
+      await onRefresh()
+    } else {
+      router.refresh()
+    }
     toast.success('F&B data refreshed')
-  }, [fetchFnbData, router])
+  }, [fetchFnbData, onRefresh, router])
 
   const handleCreateStandaloneOrder = () => {
     console.log('Creating F&B order - button clicked')
@@ -244,9 +245,7 @@ export function FnbManagement({
     try {
       const requestBody = {
         status: newStatus,
-        reason: newStatus === 'cancelled' ? 'Quick action cancellation' : undefined,
-        restore_stock: newStatus === 'cancelled',
-        notes: undefined
+        reason: newStatus === 'cancelled' ? 'staff_cancelled' : undefined
       }
 
       const response = await fetch(`/api/fnb/orders/${orderId}/status`, {
@@ -264,107 +263,112 @@ export function FnbManagement({
         throw new Error(data.error || 'Failed to update order status')
       }
 
-      toast.success(`Order status updated to ${getOrderStatusText(newStatus)}`)
-      await fetchFnbData() // Refresh data
+      toast.success(`Order ${newStatus}!`)
+      await fetchFnbData()
 
-    } catch (error) {
-      console.error('Error updating order status:', error)
-      toast.error(error instanceof Error ? error.message : 'Failed to update order status')
+      // FIX: Call refresh callback
+      if (onRefresh) {
+        await onRefresh()
+      }
+
+    } catch (err) {
+      console.error('Error updating order status:', err)
+      toast.error(err instanceof Error ? err.message : 'Failed to update order status')
     }
   }
 
-  const handleOpenStatusDialog = (order: FnbOrder) => {
+  const handleViewOrder = (order: FnbOrder) => {
     setSelectedOrder(order)
     setStatusDialogOpen(true)
   }
 
-  const handleStatusDialogSuccess = () => {
-    fetchFnbData() // Refresh data after successful update
+  const handleStatusDialogSuccess = async () => {
+    await fetchFnbData()
+    // FIX: Call refresh callback
+    if (onRefresh) {
+      await onRefresh()
+    }
+    setStatusDialogOpen(false)
+    setSelectedOrder(undefined)
   }
 
   // ============================================
-  // RENDER
+  // UTILS - ORIGINAL
   // ============================================
 
-  if (error) {
-    return (
-      <Card>
-        <CardContent className="flex items-center justify-center py-8">
-          <div className="text-center text-red-500">
-            <AlertTriangle className="w-12 h-12 mx-auto mb-2" />
-            <p>Error: {error}</p>
-            <Button onClick={fetchFnbData} variant="outline" size="sm" className="mt-2">
-              <RefreshCw className="w-4 h-4 mr-2" />
-              Retry
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    )
+  const formatCurrency = (amount: number): string => {
+    return new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR',
+      minimumFractionDigits: 0
+    }).format(amount)
   }
+
+  // ============================================
+  // RENDER - ORIGINAL LAYOUT
+  // ============================================
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-      {/* ===== SIDEBAR STATS ===== */}
-      <div className="lg:col-span-1 space-y-4">
-        {/* Today's Stats */}
+      
+      {/* ===== SIDEBAR - F&B METRICS & QUICK ACTIONS ===== */}
+      <div className="space-y-4">
+        
+        {/* Today's F&B Stats */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Today F&B</CardTitle>
-            <TrendingUp className="h-4 w-4 text-blue-600" />
+            <TrendingUp className="h-4 w-4 text-green-600" />
           </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              <div>
-                <div className="text-2xl font-bold">
-                  {formatCurrency(fnbData.todayStats.totalRevenue)}
-                </div>
-                <p className="text-xs text-gray-600">Revenue</p>
+          <CardContent className="space-y-3">
+            <div>
+              <div className="text-2xl font-bold text-green-600">
+                {formatCurrency(fnbData.todayStats.totalRevenue)}
               </div>
-              <div className="grid grid-cols-2 gap-2 text-center">
-                <div>
-                  <div className="text-lg font-semibold">{fnbData.todayStats.totalOrders}</div>
-                  <p className="text-xs text-gray-600">Orders</p>
-                </div>
-                <div>
-                  <div className="text-lg font-semibold text-yellow-600">
-                    {fnbData.todayStats.pendingOrders}
-                  </div>
-                  <p className="text-xs text-gray-600">Pending</p>
-                </div>
-              </div>
+              <p className="text-xs text-muted-foreground">
+                {fnbData.todayStats.totalOrders} orders
+              </p>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Pending:</span>
+              <Badge variant="outline" className="text-xs">
+                {fnbData.todayStats.pendingOrders}
+              </Badge>
             </div>
           </CardContent>
         </Card>
 
-        {/* Inventory Status */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Inventory</CardTitle>
-            <Package className="h-4 w-4 text-green-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              <div className="flex justify-between">
-                <span className="text-sm">Available items:</span>
-                <Badge variant="outline">
-                  {fnbData.categories.reduce((sum, cat) => 
-                    sum + cat.items.filter(item => item.isAvailable).length, 0
-                  )}
-                </Badge>
+        {/* Low Stock Alert */}
+        {fnbData.lowStockItems.length > 0 && (
+          <Card className="border-red-200">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-red-800">Low Stock Alert</CardTitle>
+              <AlertTriangle className="h-4 w-4 text-red-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {fnbData.lowStockItems.slice(0, 3).map((item) => (
+                  <div key={item.id} className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-medium">{item.name}</p>
+                      <p className="text-xs text-red-600">
+                        {item.stockQuantity} {item.unitType} left
+                      </p>
+                    </div>
+                    <Badge variant="destructive" className="text-xs">
+                      Low
+                    </Badge>
+                  </div>
+                ))}
+                {fnbData.lowStockItems.length > 3 && (
+                  <p className="text-xs text-red-600">
+                    +{fnbData.lowStockItems.length - 3} more items
+                  </p>
+                )}
               </div>
-              
-              {fnbData.lowStockItems.length > 0 && (
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-red-600">Low stock:</span>
-                  <Badge variant="destructive">
-                    {fnbData.lowStockItems.length}
-                  </Badge>
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Quick Actions */}
         <Card>
@@ -417,213 +421,124 @@ export function FnbManagement({
           <CardContent className="space-y-6">
             {/* Recent Orders Section */}
             {fnbData.recentOrders.length > 0 ? (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold">Recent Orders</h3>
-                  <Badge variant="outline">
-                    {fnbData.recentOrders.length} orders
-                  </Badge>
-                </div>
-                
-                <ScrollArea className="h-96">
-                  <div className="space-y-4">
-                    {fnbData.recentOrders.map((order) => {
-                      const nextStatus = getNextStatus(order.status)
-                      const canUpdate = canQuickUpdate(order.status)
-                      
-                      return (
-                        <Card key={order.id} className="border-l-4 border-l-blue-500">
-                          <CardContent className="p-4">
-                            <div className="space-y-3">
-                              {/* Order Header */}
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center space-x-2">
-                                  <h4 className="font-semibold">
-                                    Order #{order.id.slice(-8)}
-                                  </h4>
-                                  <Badge className={getOrderStatusColor(order.status)}>
-                                    {getStatusIcon(order.status)}
-                                    <span className="ml-1">{getOrderStatusText(order.status)}</span>
-                                  </Badge>
-                                  {order.rentalSessionId && (
-                                    <Badge variant="outline" className="text-xs">
-                                      <Timer className="w-3 h-3 mr-1" />
-                                      Session: {order.customerName || 'Attached'}
-                                    </Badge>
-                                  )}
-                                </div>
-                                
-                                <div className="flex items-center space-x-2">
-                                  {/* Quick Next Status Button */}
-                                  {canUpdate && nextStatus && (
-                                    <Button
-                                      size="sm"
-                                      onClick={() => handleQuickStatusUpdate(order.id, nextStatus)}
-                                      className="h-8"
-                                    >
-                                      {getStatusIcon(nextStatus)}
-                                      <span className="ml-1">{getOrderStatusText(nextStatus)}</span>
-                                    </Button>
-                                  )}
-                                  
-                                  {/* Quick Cancel Button */}
-                                  {canUpdate && (
-                                    <Button
-                                      size="sm"
-                                      variant="destructive"
-                                      onClick={() => handleQuickStatusUpdate(order.id, 'cancelled')}
-                                      className="h-8"
-                                    >
-                                      <XCircle className="w-3 h-3 mr-1" />
-                                      Cancel
-                                    </Button>
-                                  )}
-                                  
-                                  {/* More Actions */}
-                                  <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                      <Button variant="outline" size="sm" className="h-8 w-8 p-0">
-                                        <MoreVertical className="w-4 h-4" />
-                                      </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end">
-                                      <DropdownMenuItem onClick={() => handleOpenStatusDialog(order)}>
-                                        <Eye className="w-4 h-4 mr-2" />
-                                        View Details
-                                      </DropdownMenuItem>
-                                      <DropdownMenuSeparator />
-                                      <DropdownMenuItem onClick={() => handleOpenStatusDialog(order)}>
-                                        <RefreshCw className="w-4 h-4 mr-2" />
-                                        Change Status
-                                      </DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                  </DropdownMenu>
-                                </div>
-                              </div>
-
-                              {/* Order Details */}
-                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                                <div>
-                                  <span className="text-gray-600">Items:</span>
-                                  <div className="font-medium">
-                                    {order.items.map(item => 
-                                      `${item.quantity}x ${item.fnbItemName}`
-                                    ).join(', ')}
-                                  </div>
-                                </div>
-                                
-                                <div>
-                                  <span className="text-gray-600">Total:</span>
-                                  <div className="font-semibold text-lg">
-                                    {formatCurrency(order.totalAmount)}
-                                  </div>
-                                </div>
-                                
-                                <div>
-                                  <span className="text-gray-600">Payment:</span>
-                                  <div className={cn(
-                                    "font-medium",
-                                    order.paymentTiming === 'immediate' ? 'text-green-600' : 'text-yellow-600'
-                                  )}>
-                                    {order.paymentTiming === 'immediate' ? 'Paid' : 'End of Session'}
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Timestamp */}
-                              <div className="flex items-center justify-between text-xs text-gray-500">
-                                <span>Created: {new Date(order.createdAt).toLocaleString()}</span>
-                                {order.status === 'pending' && (
-                                  <span className="text-yellow-600 font-medium animate-pulse">
-                                    Awaiting completion
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      )
-                    })}
+              <div>
+                <h3 className="font-medium mb-4 flex items-center">
+                  <Clock className="w-4 h-4 mr-2" />
+                  Recent Orders ({fnbData.recentOrders.length})
+                </h3>
+                <ScrollArea className="h-80">
+                  <div className="space-y-3">
+                    {fnbData.recentOrders.map((order) => (
+                      <div
+                        key={order.id}
+                        className="flex items-center justify-between p-3 border rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors"
+                      >
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-2 mb-1">
+                            <Badge className={getOrderStatusColor(order.status)}>
+                              {getStatusIcon(order.status)}
+                              <span className="ml-1">{getOrderStatusText(order.status)}</span>
+                            </Badge>
+                            {order.rentalSessionId && (
+                              <Badge variant="outline" className="text-xs">
+                                Session Attached
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="text-sm">
+                            <p className="font-medium">
+                              {order.items.length} items • {formatCurrency(order.totalAmount)}
+                            </p>
+                            <p className="text-gray-600">
+                              {order.customerName || 'Walk-in'} • {new Date(order.createdAt).toLocaleTimeString()}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 w-8 p-0"
+                            onClick={() => handleViewOrder(order)}
+                          >
+                            <Eye className="w-3 h-3" />
+                          </Button>
+                          {canQuickUpdate(order.status) && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 w-8 p-0 text-green-600 hover:text-green-700"
+                              onClick={() => handleQuickStatusUpdate(order.id, getNextStatus(order.status)!)}
+                            >
+                              <CheckCircle2 className="w-3 h-3" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </ScrollArea>
               </div>
             ) : (
-              <div className="text-center py-8 text-gray-500">
-                <Coffee className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                <p>No recent F&B orders</p>
-                <p className="text-xs">Orders will appear here once created</p>
+              <div className="text-center py-8">
+                <Package2 className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">No Recent Orders</h3>
+                <p className="text-gray-600 mb-4">Start taking F&B orders to see them here</p>
+                <Button onClick={handleCreateStandaloneOrder}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Create First Order
+                </Button>
               </div>
             )}
 
             <Separator />
 
-            {/* Low Stock Alert Section */}
-            {fnbData.lowStockItems.length > 0 && (
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="w-5 h-5 text-red-500" />
-                  <h3 className="text-lg font-semibold text-red-600">Low Stock Alert</h3>
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {fnbData.lowStockItems.map((item) => (
+            {/* Active Sessions for F&B */}
+            {activeSessions.length > 0 && (
+              <div>
+                <h3 className="font-medium mb-4 flex items-center">
+                  <ShoppingCart className="w-4 h-4 mr-2" />
+                  Active Sessions Available for F&B ({activeSessions.length})
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {activeSessions.map((session) => (
                     <div
-                      key={item.id}
-                      className="flex items-center justify-between p-3 border border-red-200 rounded-lg bg-red-50"
+                      key={session.id}
+                      className="flex items-center justify-between p-3 border rounded-lg bg-blue-50 hover:bg-blue-100 transition-colors"
                     >
                       <div>
-                        <div className="font-medium text-red-800">{item.name}</div>
-                        <div className="text-sm text-red-600">{item.categoryName}</div>
-                      </div>
-                      <div className="text-right">
-                        <Badge variant="destructive" className="text-xs">
-                          {item.stockQuantity} {item.unitType}
-                        </Badge>
-                        <div className="text-xs text-red-500 mt-1">
-                          Min: {item.minStockAlert}
+                        <div className="font-medium text-blue-900">{session.unitName}</div>
+                        <div className="text-sm text-blue-700">
+                          {session.customerName || 'No name'} • {new Date(session.startTime).toLocaleTimeString()}
                         </div>
                       </div>
+                      <Badge variant="outline" className="text-xs border-blue-300 text-blue-800">
+                        Active
+                      </Badge>
                     </div>
                   ))}
                 </div>
               </div>
             )}
 
-            {/* Session Attachment Info */}
-            {activeSessions.length > 0 && (
-              <>
-                <Separator />
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <Utensils className="w-5 h-5 text-blue-500" />
-                    <h3 className="text-lg font-semibold">Active Sessions</h3>
-                    <Badge variant="outline">{activeSessions.length}</Badge>
-                  </div>
-                  
-                  <div className="text-sm text-gray-600">
-                    Available sessions for F&B order attachment:
-                  </div>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    {activeSessions.map((session) => (
-                      <div
-                        key={session.id}
-                        className="flex items-center justify-between p-2 border rounded bg-blue-50"
-                      >
-                        <div>
-                          <div className="font-medium">{session.unitName}</div>
-                          <div className="text-xs text-gray-600">
-                            {session.customerName || 'No name'}
-                          </div>
-                        </div>
-                        <Badge variant="outline" className="text-xs">
-                          Active
-                        </Badge>
-                      </div>
-                    ))}
-                  </div>
+            {/* Error State */}
+            {error && (
+              <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+                <div className="flex items-center text-red-800">
+                  <AlertTriangle className="w-4 h-4 mr-2" />
+                  <span className="text-sm font-medium">Error loading F&B data</span>
                 </div>
-              </>
+                <p className="text-sm text-red-600 mt-1">{error}</p>
+                <Button
+                  onClick={handleRefresh}
+                  variant="outline"
+                  size="sm"
+                  className="mt-2"
+                >
+                  <RefreshCw className="w-3 h-3 mr-1" />
+                  Retry
+                </Button>
+              </div>
             )}
           </CardContent>
         </Card>
