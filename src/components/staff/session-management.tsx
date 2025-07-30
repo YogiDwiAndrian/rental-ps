@@ -75,17 +75,13 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
   const [extendDialogOpen, setExtendDialogOpen] = useState(false)
 
   // ============================================
-  // DERIVED STATE - ORIGINAL ORDERING
+  // DERIVED STATE - ORIGINAL
   // ============================================
   
-  // Reorder units: available → occupied → broken → maintenance (last)
   const availableUnits = realTimeUnits.filter(unit => unit.status === 'available')
   const occupiedUnits = realTimeUnits.filter(unit => unit.status === 'occupied')
-  const brokenUnits = realTimeUnits.filter(unit => unit.status === 'broken')
   const maintenanceUnits = realTimeUnits.filter(unit => unit.status === 'maintenance')
-  
-  // Ordered units array
-  const orderedUnits = [...availableUnits, ...occupiedUnits, ...brokenUnits, ...maintenanceUnits]
+  const brokenUnits = realTimeUnits.filter(unit => unit.status === 'broken')
   
   const overtimeSessions = activeSessions.filter(session => session.isOvertime)
 
@@ -197,7 +193,7 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
       if (result.success) {
         toast.success(`Unit status changed to ${newStatus}`)
         await fetchUnitsStatus()
-        // FIX: Call callback
+        // FIX: Call callback immediately
         onRefresh?.()
       } else {
         toast.error(result.error || 'Failed to change unit status')
@@ -208,22 +204,28 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
     }
   }, [locationId, fetchUnitsStatus, onRefresh])
 
-  // FIX: Enhanced dialog success handler
+  // FIX: Immediate callback + parallel refresh
   const handleDialogSuccess = useCallback(async (): Promise<void> => {
-    await fetchActiveSessions()
-    await fetchUnitsStatus()
-    
-    // FIX: Call parent callback
+    // FIX: Call parent callback IMMEDIATELY
     if (onRefresh) {
-      await onRefresh()
+      onRefresh()
     }
     
+    // Then do parallel refresh (don't wait)
+    Promise.all([
+      fetchActiveSessions(),
+      fetchUnitsStatus()
+    ]).catch(error => {
+      console.error('Error during background refresh:', error)
+    })
+    
+    // Close dialogs immediately
     setStartDialogOpen(false)
     setStopDialogOpen(false)
     setExtendDialogOpen(false)
     setSelectedUnit(undefined)
     setSelectedSession(undefined)
-  }, [fetchActiveSessions, fetchUnitsStatus, onRefresh])
+  }, [onRefresh, fetchActiveSessions, fetchUnitsStatus])
 
   // ============================================
   // EFFECTS - ORIGINAL
@@ -285,7 +287,7 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
     }
   }, [])
 
-  const formatRemainingTime = useCallback((minutes?: number) => {
+  const formatTimeRemaining = useCallback((minutes?: number) => {
     if (minutes === undefined) return 'Running...'
     
     if (minutes < 0) {
@@ -372,11 +374,11 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
             {/* Maintenance */}
             <div className="flex items-center space-x-3">
               <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
-                <AlertCircle className="w-6 h-6 text-gray-600" />
+                <Wrench className="w-6 h-6 text-gray-600" />
               </div>
               <div>
-                <p className="text-2xl font-bold text-gray-600">{maintenanceUnits.length}</p>
-                <p className="text-sm text-gray-600">Maintenance</p>
+                <p className="text-2xl font-bold text-gray-600">{maintenanceUnits.length + brokenUnits.length}</p>
+                <p className="text-sm text-gray-600">Issues</p>
               </div>
             </div>
           </div>
@@ -385,88 +387,100 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
 
       {/* Units Grid - ORIGINAL LAYOUT */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        {orderedUnits.map((unit) => {
+        {realTimeUnits.map((unit) => {
+          const activeSession = getUnitActiveSession(unit.id)
+          const billingInfo = activeSession ? getBillingModelInfo(activeSession.billingModel) : null
+
           const isAvailable = unit.status === 'available'
           const isOccupied = unit.status === 'occupied'
           const isMaintenance = unit.status === 'maintenance'
           const isBroken = unit.status === 'broken'
-          const activeSession = getUnitActiveSession(unit.id)
-          const billingInfo = activeSession ? getBillingModelInfo(activeSession.billingModel) : null
+
+          const cardBgColor = isAvailable 
+            ? 'bg-green-50 border-green-200' 
+            : isOccupied 
+            ? 'bg-blue-50 border-blue-200'
+            : isMaintenance 
+            ? 'bg-yellow-50 border-yellow-200'
+            : 'bg-red-50 border-red-200'
 
           return (
-            <Card 
-              key={unit.id} 
-              className={cn(
-                "transition-all duration-200",
-                isAvailable && "border-green-200 bg-green-50",
-                isOccupied && "border-blue-200 bg-blue-50",
-                isMaintenance && "border-orange-200 bg-orange-50",
-                isBroken && "border-red-200 bg-red-50"
-              )}
-            >
+            <Card key={unit.id} className={cn('transition-all duration-200 hover:shadow-md', cardBgColor)}>
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <Gamepad className="w-4 h-4" />
-                    <h3 className="font-semibold text-base">{unit.name}</h3>
+                  <div>
+                    <div className="flex items-center space-x-2">
+                      <Gamepad className="w-4 h-4 text-gray-600" />
+                      <h3 className="font-medium text-gray-900">{unit.name}</h3>
+                    </div>
+                    <p className="text-xs text-gray-600 mt-1">{unit.consoleType}</p>
                   </div>
                   <Badge 
-                    variant="outline" 
-                    className={cn(
-                      "text-xs font-medium",
-                      isAvailable && "bg-green-100 text-green-800 border-green-300",
-                      isOccupied && "bg-blue-100 text-blue-800 border-blue-300",
-                      isMaintenance && "bg-orange-100 text-orange-800 border-orange-300",
-                      isBroken && "bg-red-100 text-red-800 border-red-300",
-                      activeSession?.isOvertime && "bg-orange-500 text-white border-orange-600"
-                    )}
+                    variant={isAvailable ? 'default' : isOccupied ? 'secondary' : 'destructive'}
+                    className="text-xs"
                   >
-                    {activeSession?.isOvertime ? 'OVERTIME' :
-                     isAvailable ? 'Available' :
-                     isOccupied ? 'Occupied' :
-                     isMaintenance ? 'Maintenance' :
-                     'Broken'}
+                    {unit.status}
                   </Badge>
                 </div>
               </CardHeader>
 
               <CardContent className="space-y-3">
-                {/* Session Info */}
+                {/* Customer Display Name */}
+                {unit.customerDisplayName && (
+                  <div className="bg-white p-2 rounded border border-gray-200">
+                    <p className="text-xs text-gray-600">Customer:</p>
+                    <p className="text-sm font-medium">{unit.customerDisplayName}</p>
+                  </div>
+                )}
+
+                {/* Active Session Info */}
                 {activeSession && (
-                  <div className="space-y-2">
-                    {/* Billing Model Badge */}
-                    {billingInfo && (
-                      <div className="flex justify-center">
-                        <Badge 
-                          variant="outline" 
-                          className={cn("text-xs font-medium", billingInfo.color)}
-                        >
-                          {billingInfo.icon}
-                          <span className="ml-1">{billingInfo.label}</span>
+                  <div className="bg-white p-3 rounded border">
+                    <div className="flex items-center justify-between mb-2">
+                      <Badge variant="outline" className={cn('text-xs', billingInfo?.color)}>
+                        {billingInfo?.icon}
+                        <span className="ml-1">{billingInfo?.label}</span>
+                      </Badge>
+                      {activeSession.isOvertime && (
+                        <Badge variant="destructive" className="text-xs">
+                          Overtime
                         </Badge>
+                      )}
+                    </div>
+
+                    <div className="space-y-1 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Started:</span>
+                        <span>{new Date(activeSession.startTime).toLocaleTimeString()}</span>
                       </div>
-                    )}
-                    
-                    {/* Time Info */}
-                    <div className="text-center space-y-1">
-                      {activeSession.billingModel !== 'timer' && activeSession.remainingMinutes !== undefined && (
-                        <p className="text-sm font-medium text-gray-700">
-                          {formatRemainingTime(activeSession.remainingMinutes)} remaining
-                        </p>
+                      
+                      {activeSession.estimatedEndTime && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Ends:</span>
+                          <span>{new Date(activeSession.estimatedEndTime).toLocaleTimeString()}</span>
+                        </div>
                       )}
                       
-                      {activeSession.billingModel === 'timer' && (
-                        <p className="text-sm text-gray-600">
-                          Started: {new Date(activeSession.startTime).toLocaleTimeString('id-ID', { 
-                            hour: '2-digit', 
-                            minute: '2-digit' 
-                          })}
-                        </p>
+                      {activeSession.remainingMinutes !== undefined && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Time:</span>
+                          <span className={cn(
+                            'font-medium',
+                            activeSession.isOvertime ? 'text-red-600' : 'text-blue-600'
+                          )}>
+                            {formatTimeRemaining(activeSession.remainingMinutes)}
+                          </span>
+                        </div>
                       )}
                       
-                      <p className="text-xs text-gray-500">
-                        Total: {formatCurrency(activeSession.totalAmount || 0)}
-                      </p>
+                      {activeSession.totalAmount && (
+                        <div className="flex justify-between border-t pt-1 mt-1">
+                          <span className="text-gray-600 font-medium">Amount:</span>
+                          <span className="font-semibold">
+                            {formatCurrency(activeSession.totalAmount)}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -549,7 +563,7 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
                         </Button>
                       )}
 
-                      {/* Set Broken - Small button (if needed) */}
+                      {/* Set Broken - Small button */}
                       {isAvailable && (
                         <Button 
                           variant="ghost"
@@ -563,30 +577,19 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
                       )}
                     </div>
                   )}
-
-                  {/* Info for timer sessions */}
-                  {activeSession?.billingModel === 'timer' && (
-                    <div className="text-xs text-amber-600 text-center bg-amber-50 p-2 rounded border border-amber-200">
-                      Timer mode - billing calculated when stopped
-                    </div>
-                  )}
                 </div>
+
+                {/* Timer Session Info */}
+                {activeSession?.billingModel === 'timer' && (
+                  <div className="text-xs text-amber-600 text-center bg-amber-50 p-2 rounded border border-amber-200">
+                    Timer mode - billing calculated when stopped
+                  </div>
+                )}
               </CardContent>
             </Card>
           )
         })}
       </div>
-
-      {/* Empty State */}
-      {orderedUnits.length === 0 && (
-        <Card className="border-gray-200">
-          <CardContent className="p-12 text-center">
-            <Gamepad className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">No Gaming Units</h3>
-            <p className="text-gray-500 mb-6">No units configured for this location.</p>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Dialogs - FIX: Use enhanced callback */}
       <StartSessionDialog

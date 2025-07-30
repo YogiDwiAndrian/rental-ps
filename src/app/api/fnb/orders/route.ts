@@ -4,67 +4,104 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { z } from 'zod'
+import { Decimal } from '@prisma/client/runtime/library'
 
 // ============================================
 // VALIDATION SCHEMAS
 // ============================================
 
 const getFnbOrdersSchema = z.object({
-  sessionId: z.string().optional().nullable(),
-  locationId: z.string().optional().nullable(),
-  status: z.string().optional().nullable(),
-  dateFrom: z.string().optional().nullable(),
-  dateTo: z.string().optional().nullable(),
-  page: z.string().optional().nullable(),
-  limit: z.string().optional().nullable()
+  page: z.coerce.number().min(1).default(1),
+  limit: z.coerce.number().min(1).max(100).default(20),
+  sessionId: z.string().optional(),
+  status: z.enum(['pending', 'completed', 'cancelled']).optional(),
+  startDate: z.string().datetime().optional(),
+  endDate: z.string().datetime().optional()
+})
+
+const createFnbOrderSchema = z.object({
+  items: z.array(z.object({
+    fnbItemId: z.string().min(1),
+    quantity: z.number().min(1).max(100)
+  }).or(z.object({
+    fnb_item_id: z.string().min(1),
+    quantity: z.number().min(1).max(100)
+  }))).min(1).transform((items) => {
+    // Normalize field names from both camelCase and snake_case
+    return items.map(item => ({
+      fnbItemId: 'fnbItemId' in item ? item.fnbItemId : item.fnb_item_id,
+      quantity: item.quantity
+    }))
+  }),
+  rentalSessionId: z.string().optional().or(z.literal('')),
+  rental_session_id: z.string().optional(), // Support snake_case too
+  paymentTiming: z.enum(['immediate', 'end_of_session']).default('immediate'),
+  payment_timing: z.enum(['immediate', 'end_of_session']).optional(), // Support snake_case too
+  paymentMethod: z.enum(['cash', 'card', 'digital_wallet']).default('cash').optional(),
+  payment_method: z.enum(['cash', 'card', 'digital_wallet']).optional(), // Support snake_case too
+  notes: z.string().optional()
 }).transform((data) => ({
-  sessionId: data.sessionId || undefined,
-  locationId: data.locationId || undefined,
-  status: data.status || undefined,
-  dateFrom: data.dateFrom || undefined,
-  dateTo: data.dateTo || undefined,
-  page: data.page || undefined,
-  limit: data.limit || undefined
+  items: data.items,
+  rentalSessionId: data.rentalSessionId || data.rental_session_id || undefined,
+  paymentTiming: data.paymentTiming || data.payment_timing || 'immediate',
+  paymentMethod: data.paymentMethod || data.payment_method || 'cash',
+  notes: data.notes
 }))
 
 // ============================================
-// RESPONSE TYPES
+// TYPES
 // ============================================
 
-interface FnbOrderItemResponse {
+interface FnbOrderItem {
   id: string
-  name: string
+  fnbItemId: string
+  fnbItemName: string
   quantity: number
   unitPrice: number
   totalPrice: number
-  fnbItemName: string
 }
 
-interface FnbOrderResponse {
+interface FnbOrder {
   id: string
-  rentalSessionId?: string
+  items: FnbOrderItem[]
   totalAmount: number
-  status: string
+  status: 'pending' | 'completed' | 'cancelled'
+  paymentTiming: 'immediate' | 'end_of_session'
+  rentalSessionId?: string
+  customerName?: string
+  notes?: string
   createdAt: string
-  updatedAt: string
-  items: FnbOrderItemResponse[]
-  sessionInfo?: {
-    unitName: string
-    customerName?: string
-  }
 }
 
 interface GetFnbOrdersResponse {
   success: boolean
-  data?: FnbOrderResponse[]
-  pagination?: {
+  data: FnbOrder[]
+  pagination: {
     page: number
     limit: number
     total: number
     totalPages: number
   }
-  error?: string
-  message?: string
+  message: string
+}
+
+interface CreateFnbOrderResponse {
+  success: boolean
+  data: {
+    orderId: string
+    totalAmount: number
+    itemCount: number
+    paymentStatus: 'paid' | 'pending'
+  }
+  message: string
+}
+
+// ============================================
+// UTILITY FUNCTIONS
+// ============================================
+
+function decimalToNumber(decimal: Decimal): number {
+  return parseFloat(decimal.toString())
 }
 
 // ============================================
@@ -117,24 +154,19 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // ===== PARSE QUERY PARAMETERS =====
+    // ===== VALIDATE QUERY PARAMETERS =====
     const { searchParams } = new URL(request.url)
-    const queryParams = {
-      sessionId: searchParams.get('sessionId'),
-      locationId: searchParams.get('locationId'),
-      status: searchParams.get('status'),
-      dateFrom: searchParams.get('dateFrom'),
-      dateTo: searchParams.get('dateTo'),
-      page: searchParams.get('page'),
-      limit: searchParams.get('limit')
-    }
-
+    const queryParams = Object.fromEntries(searchParams.entries())
     const validatedParams = getFnbOrdersSchema.parse(queryParams)
 
     // ===== BUILD QUERY CONDITIONS =====
-    interface WhereConditions {
-      rentalSession?: {
-        locationId: string
+    const whereClause: {
+      fnbOrderItems: {
+        some: {
+          fnbItem: {
+            locationId: string
+          }
+        }
       }
       rentalSessionId?: string
       status?: string
@@ -142,49 +174,41 @@ export async function GET(request: NextRequest) {
         gte?: Date
         lte?: Date
       }
+    } = {
+      fnbOrderItems: {
+        some: {
+          fnbItem: {
+            locationId: locationId
+          }
+        }
+      }
     }
 
-    const whereConditions: WhereConditions = {}
-
-    // Always filter by location from header (primary filter)
-    whereConditions.rentalSession = {
-      locationId: locationId
-    }
-
-    // If sessionId provided, filter by specific session
+    // Add session filter if provided
     if (validatedParams.sessionId) {
-      whereConditions.rentalSessionId = validatedParams.sessionId
+      whereClause.rentalSessionId = validatedParams.sessionId
     }
 
-    // If status provided, filter by status
+    // Add status filter if provided
     if (validatedParams.status) {
-      whereConditions.status = validatedParams.status
+      whereClause.status = validatedParams.status
     }
 
-    // If date range provided, filter by creation date
-    if (validatedParams.dateFrom || validatedParams.dateTo) {
-      whereConditions.createdAt = {}
-      
-      if (validatedParams.dateFrom) {
-        whereConditions.createdAt.gte = new Date(validatedParams.dateFrom)
+    // Add date range filter if provided
+    if (validatedParams.startDate || validatedParams.endDate) {
+      whereClause.createdAt = {}
+      if (validatedParams.startDate) {
+        whereClause.createdAt.gte = new Date(validatedParams.startDate)
       }
-      
-      if (validatedParams.dateTo) {
-        const endDate = new Date(validatedParams.dateTo)
-        endDate.setHours(23, 59, 59, 999) // End of day
-        whereConditions.createdAt.lte = endDate
+      if (validatedParams.endDate) {
+        whereClause.createdAt.lte = new Date(validatedParams.endDate)
       }
     }
 
-    // ===== PAGINATION =====
-    const page = parseInt(validatedParams.page || '1')
-    const limit = parseInt(validatedParams.limit || '50')
-    const skip = (page - 1) * limit
-
-    // ===== FETCH F&B ORDERS =====
-    const [fnbOrders, totalCount] = await Promise.all([
+    // ===== FETCH ORDERS WITH PAGINATION =====
+    const [orders, totalCount] = await Promise.all([
       prisma.fnbOrder.findMany({
-        where: whereConditions,
+        where: whereClause,
         include: {
           fnbOrderItems: {
             include: {
@@ -193,14 +217,10 @@ export async function GET(request: NextRequest) {
                   name: true
                 }
               }
-            },
-            orderBy: {
-              createdAt: 'asc'
             }
           },
           rentalSession: {
-            select: {
-              id: true,
+            include: {
               unit: {
                 select: {
                   name: true,
@@ -213,35 +233,32 @@ export async function GET(request: NextRequest) {
         orderBy: {
           createdAt: 'desc'
         },
-        skip: skip,
-        take: limit
+        skip: (validatedParams.page - 1) * validatedParams.limit,
+        take: validatedParams.limit
       }),
-      
       prisma.fnbOrder.count({
-        where: whereConditions
+        where: whereClause
       })
     ])
 
     // ===== FORMAT RESPONSE =====
-    const formattedOrders: FnbOrderResponse[] = fnbOrders.map(order => ({
+    const formattedOrders: FnbOrder[] = orders.map(order => ({
       id: order.id,
-      rentalSessionId: order.rentalSessionId || undefined,
-      totalAmount: Number(order.totalAmount),
-      status: order.status,
-      createdAt: order.createdAt.toISOString(),
-      updatedAt: order.updatedAt.toISOString(),
       items: order.fnbOrderItems.map(item => ({
         id: item.id,
-        name: item.fnbItem.name,
+        fnbItemId: item.fnbItemId,
+        fnbItemName: item.fnbItem.name,
         quantity: item.quantity,
-        unitPrice: Number(item.unitPrice),
-        totalPrice: Number(item.totalPrice),
-        fnbItemName: item.fnbItem.name
+        unitPrice: decimalToNumber(item.unitPrice),
+        totalPrice: decimalToNumber(item.totalPrice)
       })),
-      sessionInfo: order.rentalSession ? {
-        unitName: order.rentalSession.unit.name,
-        customerName: order.rentalSession.unit.customerDisplayName || undefined
-      } : undefined
+      totalAmount: decimalToNumber(order.totalAmount),
+      status: order.status as 'pending' | 'completed' | 'cancelled',
+      paymentTiming: order.rentalSessionId ? 'end_of_session' : 'immediate',
+      rentalSessionId: order.rentalSessionId || undefined,
+      customerName: order.rentalSession?.unit?.customerDisplayName || undefined,
+      notes: undefined, // Add this field to schema if needed
+      createdAt: order.createdAt.toISOString()
     }))
 
     // ===== PREPARE RESPONSE =====
@@ -249,10 +266,10 @@ export async function GET(request: NextRequest) {
       success: true,
       data: formattedOrders,
       pagination: {
-        page: page,
-        limit: limit,
+        page: validatedParams.page,
+        limit: validatedParams.limit,
         total: totalCount,
-        totalPages: Math.ceil(totalCount / limit)
+        totalPages: Math.ceil(totalCount / validatedParams.limit)
       },
       message: validatedParams.sessionId 
         ? `Found ${formattedOrders.length} F&B orders for session`
@@ -294,37 +311,6 @@ export async function GET(request: NextRequest) {
 // ============================================
 // POST: CREATE F&B ORDER
 // ============================================
-
-const createFnbOrderSchema = z.object({
-  items: z.array(z.object({
-    fnbItemId: z.string().min(1),
-    quantity: z.number().min(1).max(100)
-  }).or(z.object({
-    fnb_item_id: z.string().min(1),
-    quantity: z.number().min(1).max(100)
-  }))).min(1).transform((items) => {
-    // Normalize field names from both camelCase and snake_case
-    return items.map(item => ({
-      fnbItemId: 'fnbItemId' in item ? item.fnbItemId : item.fnb_item_id,
-      quantity: item.quantity
-    }))
-  }),
-  rentalSessionId: z.string().optional().or(z.literal('')),
-  rental_session_id: z.string().optional(), // Support snake_case too
-  paymentTiming: z.enum(['immediate', 'end_of_session']).default('immediate'),
-  payment_timing: z.enum(['immediate', 'end_of_session']).optional(), // Support snake_case too
-  paymentMethod: z.enum(['cash', 'card', 'digital_wallet']).default('cash').optional(),
-  payment_method: z.enum(['cash', 'card', 'digital_wallet']).optional(), // Support snake_case too
-  notes: z.string().optional()
-}).transform((data) => ({
-  items: data.items,
-  rentalSessionId: data.rentalSessionId || data.rental_session_id || undefined,
-  paymentTiming: data.paymentTiming || data.payment_timing || 'immediate',
-  paymentMethod: data.paymentMethod || data.payment_method || 'cash',
-  notes: data.notes
-}))
-
-type CreateFnbOrderRequest = z.infer<typeof createFnbOrderSchema>
 
 export async function POST(request: NextRequest) {
   try {
@@ -381,39 +367,47 @@ export async function POST(request: NextRequest) {
       const rentalSession = await prisma.rentalSession.findFirst({
         where: {
           id: validatedData.rentalSessionId,
-          locationId: locationId,
-          status: 'active'
+          status: 'active',
+          unit: {
+            locationId: locationId
+          }
         }
       })
 
       if (!rentalSession) {
         return NextResponse.json(
-          { success: false, error: 'Active rental session not found' },
-          { status: 404 }
+          { 
+            success: false, 
+            error: 'Invalid rental session or session not active' 
+          },
+          { status: 400 }
         )
       }
     }
 
-    // ===== GET F&B ITEMS AND CALCULATE TOTAL =====
+    // ===== FETCH AND VALIDATE F&B ITEMS =====
+    const fnbItemIds = validatedData.items.map(item => item.fnbItemId)
     const fnbItems = await prisma.fnbItem.findMany({
       where: {
-        id: { in: validatedData.items.map(item => item.fnbItemId) },
+        id: { in: fnbItemIds },
         locationId: locationId,
         isActive: true
       }
     })
 
-    if (fnbItems.length !== validatedData.items.length) {
-      return NextResponse.json(
-        { success: false, error: 'Some F&B items not found or inactive' },
-        { status: 400 }
-      )
-    }
-
-    // Check stock availability
+    // Check if all items exist and are available
     for (const orderItem of validatedData.items) {
       const fnbItem = fnbItems.find(item => item.id === orderItem.fnbItemId)
-      if (!fnbItem) continue
+      
+      if (!fnbItem) {
+        return NextResponse.json(
+          { 
+            success: false, 
+            error: `F&B item not found: ${orderItem.fnbItemId}` 
+          },
+          { status: 400 }
+        )
+      }
 
       if (fnbItem.stockQuantity < orderItem.quantity) {
         return NextResponse.json(
@@ -441,14 +435,17 @@ export async function POST(request: NextRequest) {
       }
     })
 
-    // ===== CREATE F&B ORDER =====
+    // ===== CREATE F&B ORDER WITH TRANSACTION =====
     const result = await prisma.$transaction(async (tx) => {
+      // FIXED: Set proper initial status based on business logic
+      const initialStatus = validatedData.paymentTiming === 'immediate' ? 'completed' : 'pending'
+      
       // Create F&B order
       const fnbOrder = await tx.fnbOrder.create({
         data: {
           rentalSessionId: validatedData.rentalSessionId,
           totalAmount: totalAmount,
-          status: 'completed'
+          status: initialStatus  // FIXED: Use business logic for status
         }
       })
 
@@ -490,7 +487,7 @@ export async function POST(request: NextRequest) {
             type: 'fnb',
             amount: totalAmount,
             paymentStatus: 'paid',
-            paymentMethod: 'cash',
+            paymentMethod: validatedData.paymentMethod || 'cash',
             description: validatedData.rentalSessionId 
               ? 'F&B order (attached to session)'
               : 'F&B standalone order'
@@ -501,7 +498,8 @@ export async function POST(request: NextRequest) {
       return { fnbOrder, fnbOrderItems }
     })
 
-    return NextResponse.json({
+    // ===== PREPARE RESPONSE =====
+    const response: CreateFnbOrderResponse = {
       success: true,
       data: {
         orderId: result.fnbOrder.id,
@@ -509,8 +507,12 @@ export async function POST(request: NextRequest) {
         itemCount: validatedData.items.length,
         paymentStatus: validatedData.paymentTiming === 'immediate' ? 'paid' : 'pending'
       },
-      message: 'F&B order created successfully'
-    })
+      message: validatedData.paymentTiming === 'immediate' 
+        ? 'F&B order created and paid successfully'
+        : 'F&B order created - payment will be processed at end of session'
+    }
+
+    return NextResponse.json(response)
 
   } catch (error) {
     console.error('Create F&B Order API Error:', error)

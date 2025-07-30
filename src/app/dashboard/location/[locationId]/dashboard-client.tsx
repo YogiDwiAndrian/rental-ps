@@ -1,4 +1,4 @@
-// src/app/dashboard/location/[locationId]/dashboard-client.tsx - ORIGINAL LAYOUT + MINIMAL FIXES
+// src/app/dashboard/location/[locationId]/dashboard-client.tsx - FIXED
 'use client'
 
 import { useState, useCallback } from 'react'
@@ -24,9 +24,10 @@ import {
   Calendar,
   Target,
   Timer,
-  Coffee
+  Coffee,
+  AlertTriangle
 } from 'lucide-react'
-import { formatCurrency } from '@/lib/utils'
+import { cn, formatCurrency } from '@/lib/utils'
 import { 
   formatWorkSessionDuration,
   getPerformanceScoreColor,
@@ -36,7 +37,7 @@ import {
 } from '@/lib/work-session-utils'
 
 // ============================================
-// TYPES - ORIGINAL + FIX startTime
+// TYPES - FIXED
 // ============================================
 
 interface DashboardData {
@@ -93,68 +94,62 @@ interface DashboardData {
     id: string
     unitName: string
     customerName?: string
-    startTime: string  // FIX: Add startTime field
+    startTime: string
   }>
 }
 
 interface DashboardClientProps {
+  dashboardData: DashboardData | null
   locationId: string
-  dashboardData: DashboardData
 }
 
 // ============================================
-// COMPONENT - ORIGINAL LAYOUT
+// COMPONENT - FIXED
 // ============================================
 
-export function DashboardClient({ locationId, dashboardData }: DashboardClientProps) {
+export function DashboardClient({ dashboardData, locationId }: DashboardClientProps) {
+  const [currentDashboardData, setCurrentDashboardData] = useState<DashboardData | null>(dashboardData || null)
   const [showCreateFnbDialog, setShowCreateFnbDialog] = useState(false)
-
-  const {
-    location,
-    activeSessions,
-    availableUnits,
-    totalUnits,
-    occupancyRate,
-    availableFnbItems,
-    lowStockItems,
-    currentWorkSession,
-    activeStaff,
-    shiftDuration,
-    workSessionSummary,
-    unitsForSessionManagement,
-    activeSessionsForFnb
-  } = dashboardData
+  const [loading, setLoading] = useState(false)
 
   // ============================================
-  // FIX: Add callback functions for data refresh
+  // DATA REFRESH FUNCTIONS - FIXED (hooks first)
   // ============================================
 
   const refreshDashboardData = useCallback(async () => {
     try {
+      setLoading(true)
+      
       const response = await fetch(`/api/dashboard/locations/${locationId}`, {
         headers: {
           'X-Location-ID': locationId
         }
       })
-
+      
       if (!response.ok) {
         throw new Error('Failed to fetch dashboard data')
       }
 
       const result = await response.json()
       
-      if (result.success) {
-        // Note: In a real implementation, you'd update state here
-        // For now, we'll let parent handle the refresh
+      if (result.success && result.data) {
+        setCurrentDashboardData(result.data)
       }
     } catch (error) {
       console.error('Error refreshing dashboard data:', error)
+    } finally {
+      setLoading(false)
     }
   }, [locationId])
 
-  const refreshActiveSessions = useCallback(async (): Promise<void> => {
+  // FIXED: Properly update activeSessionsForFnb state
+  const refreshActiveSessions = useCallback(async () => {
     try {
-      const response = await fetch(`/api/rentals/active?locationId=${locationId}`)
+      const response = await fetch(`/api/dashboard/locations/${locationId}/active-sessions`, {
+        headers: {
+          'X-Location-ID': locationId
+        }
+      })
       
       if (!response.ok) {
         throw new Error('Failed to fetch active sessions')
@@ -169,33 +164,76 @@ export function DashboardClient({ locationId, dashboardData }: DashboardClientPr
           unitName: string
           unitId: string
           startTime: string
+          customerName?: string
         }) => ({
           id: session.sessionId,
           unitName: session.unitName,
-          customerName: undefined,
-          startTime: session.startTime  // FIX: Include startTime
+          customerName: session.customerName,
+          startTime: session.startTime
         }))
 
-        // Note: In real implementation, you'd update activeSessionsForFnb state
+        // FIXED: Actually update the state with null check
+        setCurrentDashboardData(prev => {
+          if (!prev) return prev
+          return {
+            ...prev,
+            activeSessionsForFnb: activeSessions,
+            activeSessions: activeSessions.length
+          }
+        })
       }
     } catch (error) {
       console.error('Error refreshing active sessions:', error)
     }
   }, [locationId])
 
+  // FIXED: Ensure proper refresh sequence
   const handleSessionChange = useCallback(async () => {
+    // First refresh active sessions
     await refreshActiveSessions()
+    // Then refresh full dashboard data
     await refreshDashboardData()
   }, [refreshActiveSessions, refreshDashboardData])
 
   const handleFnbOrderSuccess = useCallback(async () => {
+    // Refresh both sessions and dashboard data
+    await refreshActiveSessions()
     await refreshDashboardData()
     setShowCreateFnbDialog(false)
-  }, [refreshDashboardData])
+  }, [refreshActiveSessions, refreshDashboardData])
 
   const handleCreateFnbOrder = useCallback(() => {
     setShowCreateFnbDialog(true)
   }, [])
+
+  // Early return AFTER all hooks
+  if (!currentDashboardData) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading dashboard...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Destructure dashboard data for easier access
+  const {
+    location,
+    activeSessions,
+    availableUnits,
+    totalUnits,
+    occupancyRate,
+    availableFnbItems,
+    lowStockItems,
+    currentWorkSession,
+    activeStaff,
+    shiftDuration,
+    workSessionSummary,
+    unitsForSessionManagement,
+    activeSessionsForFnb
+  } = currentDashboardData
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -206,35 +244,35 @@ export function DashboardClient({ locationId, dashboardData }: DashboardClientPr
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
               <div className="flex items-center space-x-2">
-                <MapPin className="w-6 h-6 text-blue-600" />
+                <MapPin className="w-5 h-5 text-gray-600" />
                 <div>
                   <h1 className="text-2xl font-bold text-gray-900">{location.name}</h1>
-                  <p className="text-gray-600 text-sm">
-                    {location.code} • {location.tenant.name}
-                  </p>
+                  <p className="text-sm text-gray-600">{location.code}</p>
                 </div>
               </div>
+              
               <Badge variant="outline" className="bg-green-50 border-green-200 text-green-800">
                 <Wifi className="w-3 h-3 mr-1" />
                 Online
               </Badge>
             </div>
-            
+
             <div className="flex items-center space-x-3">
-              <Button variant="outline" size="sm">
-                <Settings className="w-4 h-4 mr-2" />
-                Settings
-              </Button>
-              <Button variant="outline" size="sm">
-                <BarChart3 className="w-4 h-4 mr-2" />
-                Reports
-              </Button>
+              <div className="text-right">
+                <p className="text-sm text-gray-600">
+                  {location.tenant.name}
+                </p>
+                <p className="text-xs text-gray-500">
+                  {location.tenant.subdomain}.rentalps.com
+                </p>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* ===== DASHBOARD METRICS ===== */}
+        {/* ===== QUICK STATS ===== */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          
           {/* Active Sessions */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -244,45 +282,71 @@ export function DashboardClient({ locationId, dashboardData }: DashboardClientPr
             <CardContent>
               <div className="text-2xl font-bold text-blue-600">{activeSessions}</div>
               <p className="text-xs text-muted-foreground">
-                Currently playing
+                {availableUnits} units available
               </p>
+              <div className="mt-2">
+                <Badge variant="secondary" className="text-xs">
+                  {occupancyRate.toFixed(1)}% occupied
+                </Badge>
+              </div>
             </CardContent>
           </Card>
 
-          {/* Available Units */}
+          {/* Today's Revenue */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Available Units</CardTitle>
-              <Users className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-sm font-medium">Today Revenue</CardTitle>
+              <DollarSign className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-green-600">{availableUnits}</div>
-              <p className="text-xs text-muted-foreground">
-                Out of {totalUnits} units
-              </p>
-            </CardContent>
-          </Card>
-
-          {/* Occupancy Rate */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Occupancy</CardTitle>
-              <TrendingUp className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-purple-600">
-                {Math.round(occupancyRate * 100)}%
+              <div className="text-2xl font-bold text-green-600">
+                {currentWorkSession ? formatCurrency(currentWorkSession.totalRevenue) : formatCurrency(0)}
               </div>
               <p className="text-xs text-muted-foreground">
-                Current utilization
+                {currentWorkSession ? `${currentWorkSession.totalSessions} sessions` : '0 sessions'}
               </p>
+              <div className="mt-2">
+                <Badge variant="outline" className="text-xs bg-green-50 border-green-200 text-green-800">
+                  <TrendingUp className="w-3 h-3 mr-1" />
+                  Active
+                </Badge>
+              </div>
             </CardContent>
           </Card>
 
-          {/* Work Session Duration */}
+          {/* F&B Status */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Work Session</CardTitle>
+              <CardTitle className="text-sm font-medium">F&B Inventory</CardTitle>
+              <Coffee className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-orange-600">
+                {availableFnbItems.reduce((sum, item) => sum + item.stockQuantity, 0)}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Items in stock
+              </p>
+              <div className="mt-2">
+                {lowStockItems.length > 0 ? (
+                  <Badge variant="destructive" className="text-xs">
+                    <AlertTriangle className="w-3 h-3 mr-1" />
+                    {lowStockItems.length} low stock
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-xs bg-green-50 border-green-200 text-green-800">
+                    <CheckCircle2 className="w-3 h-3 mr-1" />
+                    All good
+                  </Badge>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Work Session */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Current Shift</CardTitle>
               <Timer className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
@@ -319,7 +383,7 @@ export function DashboardClient({ locationId, dashboardData }: DashboardClientPr
           <SessionManagement 
             locationId={locationId}
             units={unitsForSessionManagement}
-            onRefresh={handleSessionChange}  // FIX: Add callback
+            onRefresh={handleSessionChange}  // FIXED: Proper callback
           />
         </div>
 
@@ -329,8 +393,8 @@ export function DashboardClient({ locationId, dashboardData }: DashboardClientPr
             locationId={locationId}
             activeSessions={activeSessionsForFnb}
             onCreateOrder={handleCreateFnbOrder}
-            onRefresh={refreshDashboardData}  // FIX: Add callback
-            refreshSessions={refreshActiveSessions}  // FIX: Add callback
+            onRefresh={refreshDashboardData}
+            refreshSessions={refreshActiveSessions}  // FIXED: Pass refresh function
           />
         </div>
 
@@ -347,39 +411,31 @@ export function DashboardClient({ locationId, dashboardData }: DashboardClientPr
               </CardHeader>
               <CardContent className="space-y-4">
                 {currentWorkSession ? (
-                  <>
+                  <div className="space-y-4">
                     <div className="flex items-center justify-between">
                       <div>
-                        <h3 className="font-semibold">{currentWorkSession.user.name || 'Staff Member'}</h3>
-                        <p className="text-sm text-gray-600">{currentWorkSession.user.email}</p>
+                        <p className="text-sm text-gray-600">Started by</p>
+                        <p className="font-medium">{currentWorkSession.user.name || 'Staff Member'}</p>
                       </div>
-                      <Badge className="bg-green-100 text-green-800 border-green-200">
-                        <Activity className="w-3 h-3 mr-1" />
-                        Active
-                      </Badge>
+                      <div className="text-right">
+                        <p className="text-sm text-gray-600">Duration</p>
+                        <p className="font-medium text-purple-600">
+                          {shiftDuration ? formatWorkSessionDuration(shiftDuration) : '0:00'}
+                        </p>
+                      </div>
                     </div>
                     
                     <Separator />
                     
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <p className="text-gray-600">Duration</p>
-                        <p className="font-semibold">
-                          {shiftDuration ? formatWorkSessionDuration(shiftDuration) : '0:00'}
-                        </p>
+                        <p className="text-sm text-gray-600">Sessions Today</p>
+                        <p className="text-lg font-semibold">{currentWorkSession.totalSessions}</p>
                       </div>
                       <div>
-                        <p className="text-gray-600">Sessions</p>
-                        <p className="font-semibold">{currentWorkSession.totalSessions}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-600">Revenue</p>
-                        <p className="font-semibold">{formatCurrency(currentWorkSession.totalRevenue)}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-600">Started</p>
-                        <p className="font-semibold">
-                          {new Date(currentWorkSession.startTime).toLocaleTimeString()}
+                        <p className="text-sm text-gray-600">Revenue Today</p>
+                        <p className="text-lg font-semibold text-green-600">
+                          {formatCurrency(currentWorkSession.totalRevenue)}
                         </p>
                       </div>
                     </div>
@@ -387,55 +443,49 @@ export function DashboardClient({ locationId, dashboardData }: DashboardClientPr
                     {workSessionSummary && (
                       <>
                         <Separator />
-                        <div className="bg-blue-50 p-3 rounded-lg">
-                          <h4 className="font-medium text-blue-900 mb-2">Performance Summary</h4>
-                          <div className="grid grid-cols-2 gap-4 text-sm">
-                            <div>
-                              <p className="text-blue-700">Avg Revenue/Hour</p>
-                              <p className="font-semibold text-blue-900">
-                                {formatCurrency(workSessionSummary.averageRevenuePerHour)}/hr  {/* FIX: Use correct property */}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-blue-700">Performance</p>
-                              <Badge 
-                                variant="outline" 
-                                className={`text-xs ${getPerformanceScoreColor(workSessionSummary.performanceScore)}`}
-                              >
-                                {getPerformanceScoreLabel(workSessionSummary.performanceScore)}
-                              </Badge>
-                            </div>
+                        <div className="space-y-2">
+                          <p className="text-sm font-medium">Performance Score</p>
+                          <div className="flex items-center space-x-2">
+                            <Badge 
+                              variant="outline" 
+                              className={cn(
+                                "text-xs",
+                                getPerformanceScoreColor(workSessionSummary.performanceScore).bg,
+                                getPerformanceScoreColor(workSessionSummary.performanceScore).text,
+                                getPerformanceScoreColor(workSessionSummary.performanceScore).border
+                              )}
+                            >
+                              {getPerformanceScoreLabel(workSessionSummary.performanceScore)}
+                            </Badge>
                           </div>
                         </div>
                       </>
                     )}
-                  </>
+                  </div>
                 ) : (
                   <div className="text-center py-8">
-                    <Timer className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-                    <h3 className="text-lg font-medium text-gray-900 mb-2">No Active Work Session</h3>
-                    <p className="text-gray-600 mb-4">Start your shift to begin tracking performance and revenue</p>
-                    <Button>
-                      <Clock className="w-4 h-4 mr-2" />
-                      Start Work Session
-                    </Button>
+                    <Clock className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                    <p className="text-gray-600 mb-2">No active work session</p>
+                    <p className="text-sm text-gray-500">
+                      Start your shift to begin tracking revenue and performance
+                    </p>
                   </div>
                 )}
               </CardContent>
             </Card>
           </div>
 
-          {/* System Status - Takes 1 column */}
-          <div>
+          {/* Activity Sidebar */}
+          <div className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg flex items-center">
-                  <Wifi className="w-4 h-4 mr-2" />
+                <CardTitle className="flex items-center text-sm">
+                  <Activity className="w-4 h-4 mr-2" />
                   System Status
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="space-y-2 text-sm">
+                <div className="space-y-2 text-xs">
                   <div className="flex justify-between">
                     <span>Session management</span>
                     <CheckCircle2 className="w-4 h-4 text-green-500" />
@@ -475,8 +525,8 @@ export function DashboardClient({ locationId, dashboardData }: DashboardClientPr
           onOpenChange={setShowCreateFnbDialog}
           locationId={locationId}
           activeSessions={activeSessionsForFnb}
-          refreshSessions={refreshActiveSessions}  // FIX: Add callback
-          onSuccess={handleFnbOrderSuccess}  // FIX: Use proper callback
+          refreshSessions={refreshActiveSessions}  // FIXED: Pass refresh function
+          onSuccess={handleFnbOrderSuccess}  // FIXED: Proper callback
         />
       </div>
     </div>

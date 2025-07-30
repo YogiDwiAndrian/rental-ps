@@ -1,4 +1,4 @@
-// src/components/staff/stop-session-dialog.tsx
+// src/components/staff/stop-session-dialog.tsx - FIXED F&B ITEM DISPLAY
 'use client'
 
 import { useState, useEffect } from 'react'
@@ -23,6 +23,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Separator } from '@/components/ui/separator'
 import { Badge } from '@/components/ui/badge'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { 
   StopCircle, 
   CreditCard, 
@@ -32,12 +33,13 @@ import {
   Clock,
   Receipt,
   AlertTriangle,
-  ShoppingBag
+  ShoppingBag,
+  Package
 } from 'lucide-react'
 import { toast } from 'sonner'
 
 // ============================================
-// TYPES
+// TYPES - FIXED F&B ORDER STRUCTURE
 // ============================================
 
 interface ActiveSession {
@@ -54,9 +56,11 @@ interface ActiveSession {
   extendedDuration?: number
 }
 
+// FIXED: Updated F&B types to match API response
 interface FnbOrderItem {
   id: string
-  name: string
+  fnbItemId: string
+  fnbItemName: string  // FIXED: This should contain the item name
   quantity: number
   unitPrice: number
   totalPrice: number
@@ -65,8 +69,9 @@ interface FnbOrderItem {
 interface AttachedFnbOrder {
   id: string
   totalAmount: number
-  status: string
-  items: FnbOrderItem[]
+  status: 'pending' | 'completed' | 'cancelled'
+  paymentTiming: 'immediate' | 'end_of_session'
+  items: FnbOrderItem[]  // FIXED: Include items array
   createdAt: string
 }
 
@@ -135,7 +140,8 @@ const calculateSessionCost = (
     
     // 5 minute grace period
     const chargeableOvertime = Math.max(0, overtimeMinutes - 5)
-    const overtimeCost = chargeableOvertime > 0 ? Math.ceil((chargeableOvertime / 60) * hourlyRate) : 0
+    const overtimeCost = chargeableOvertime > 0 ? 
+      Math.ceil((chargeableOvertime / 60) * hourlyRate) : 0
     
     return { 
       baseCost: baseCost, 
@@ -263,20 +269,15 @@ export function StopSessionDialog({
     }
   }
 
-  const handleCancel = (): void => {
-    onOpenChange(false)
-  }
+  if (!session) return null
 
   // ============================================
   // CALCULATIONS
   // ============================================
 
-  if (!session) return null
-
-  const sessionDuration = calculateDuration(session.startTime)
-  const sessionCosts = calculateSessionCost(session, hourlyRate)
-  const totalAttachedFnb = attachedFnbOrders.reduce((sum, order) => sum + order.totalAmount, 0)
-  const finalTotal = sessionCosts.totalCost + totalAttachedFnb + formData.fnbAmount
+  const sessionCost = calculateSessionCost(session, hourlyRate)
+  const fnbTotal = attachedFnbOrders.reduce((total, order) => total + order.totalAmount, 0)
+  const grandTotal = sessionCost.totalCost + fnbTotal + formData.fnbAmount
 
   // ============================================
   // RENDER
@@ -284,109 +285,165 @@ export function StopSessionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center">
-            <StopCircle className="w-5 h-5 mr-2" />
-            Stop Session
+            <StopCircle className="w-5 h-5 mr-2 text-red-600" />
+            Stop Session - {session.unitName}
           </DialogTitle>
           <DialogDescription>
-            Complete the session and process payment
+            Calculate final bill and process payment for this gaming session.
           </DialogDescription>
         </DialogHeader>
-        
-        <div className="space-y-4">
-          {/* Session Summary */}
-          <div className="bg-gray-50 p-4 rounded-lg space-y-3">
-            <div className="flex items-center justify-between">
-              <h4 className="font-medium text-gray-900">Session Summary</h4>
-              {session.isOvertime && (
-                <Badge variant="destructive" className="text-xs">
-                  <AlertTriangle className="w-3 h-3 mr-1" />
-                  Overtime
-                </Badge>
-              )}
+
+        <div className="space-y-6">
+          
+          {/* Session Details */}
+          <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+            <h3 className="font-medium text-blue-900 mb-3 flex items-center">
+              <Clock className="w-4 h-4 mr-2" />
+              Session Details
+            </h3>
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <span className="text-blue-700">Unit:</span>
+                <div className="font-medium">{session.unitName}</div>
+              </div>
+              <div>
+                <span className="text-blue-700">Duration:</span>
+                <div className="font-medium">{calculateDuration(session.startTime)}</div>
+              </div>
+              <div>
+                <span className="text-blue-700">Billing:</span>
+                <div className="font-medium capitalize">{session.billingModel}</div>
+              </div>
+              <div>
+                <span className="text-blue-700">Started:</span>
+                <div className="font-medium">{new Date(session.startTime).toLocaleString()}</div>
+              </div>
             </div>
             
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <span className="text-gray-600">Unit:</span>
-                <p className="font-medium">{session.unitName}</p>
+            {session.isOvertime && (
+              <div className="mt-3 p-2 bg-red-100 border border-red-200 rounded">
+                <div className="flex items-center text-red-700">
+                  <AlertTriangle className="w-4 h-4 mr-2" />
+                  <span className="text-sm font-medium">Session is overtime</span>
+                </div>
               </div>
-              
-              <div>
-                <span className="text-gray-600">Duration:</span>
-                <p className="font-medium">{sessionDuration}</p>
+            )}
+          </div>
+
+          {/* F&B Orders - FIXED DISPLAY */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="font-medium text-gray-900 flex items-center">
+                <ShoppingBag className="w-4 h-4 mr-2" />
+                Attached F&B Orders
+              </h3>
+              {fetchingFnb && (
+                <div className="text-sm text-gray-500">Loading...</div>
+              )}
+            </div>
+
+            {attachedFnbOrders.length === 0 ? (
+              <div className="text-center py-4 text-gray-500">
+                <Coffee className="w-8 h-8 mx-auto mb-2 text-gray-400" />
+                <p className="text-sm">No F&B orders attached to this session</p>
               </div>
-              
-              <div>
-                <span className="text-gray-600">Billing:</span>
-                <p className="font-medium capitalize">{session.billingModel}</p>
+            ) : (
+              <ScrollArea className="max-h-48">
+                <div className="space-y-3">
+                  {attachedFnbOrders.map((order) => (
+                    <div key={order.id} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center space-x-2">
+                          <Badge variant="outline" className="text-xs">
+                            Order #{order.id.substring(0, 8)}
+                          </Badge>
+                          <Badge 
+                            variant={order.status === 'completed' ? 'default' : 'secondary'}
+                            className="text-xs"
+                          >
+                            {order.status}
+                          </Badge>
+                        </div>
+                        <div className="text-sm font-medium">
+                          {formatCurrency(order.totalAmount)}
+                        </div>
+                      </div>
+
+                      {/* FIXED: Display F&B items with names */}
+                      <div className="space-y-1">
+                        {order.items.map((item) => (
+                          <div key={item.id} className="flex items-center justify-between text-sm">
+                            <div className="flex items-center space-x-2">
+                              <Package className="w-3 h-3 text-gray-500" />
+                              <span className="text-gray-700">{item.fnbItemName}</span>
+                              <span className="text-gray-500">x{item.quantity}</span>
+                            </div>
+                            <span className="text-gray-700 font-medium">
+                              {formatCurrency(item.totalPrice)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="mt-2 pt-2 border-t border-gray-300">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">Payment:</span>
+                          <span className={order.paymentTiming === 'immediate' ? 'text-green-600' : 'text-yellow-600'}>
+                            {order.paymentTiming === 'immediate' ? 'Already Paid' : 'End of Session'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-xs text-gray-500">
+                          <span>Created:</span>
+                          <span>{new Date(order.createdAt).toLocaleString()}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            )}
+          </div>
+
+          {/* Cost Breakdown */}
+          <div className="bg-gray-50 p-4 rounded-lg border">
+            <h3 className="font-medium text-gray-900 mb-3 flex items-center">
+              <Receipt className="w-4 h-4 mr-2" />
+              Cost Breakdown
+            </h3>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span>Session Cost:</span>
+                <span className="font-medium">{formatCurrency(sessionCost.baseCost)}</span>
               </div>
-              
-              <div>
-                <span className="text-gray-600">Status:</span>
-                <p className={`font-medium ${session.isOvertime ? 'text-red-600' : 'text-green-600'}`}>
-                  {session.isOvertime ? 'Overtime' : 'Normal'}
-                </p>
+              {sessionCost.overtimeCost > 0 && (
+                <div className="flex justify-between text-red-600">
+                  <span>Overtime Cost:</span>
+                  <span className="font-medium">{formatCurrency(sessionCost.overtimeCost)}</span>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <span>F&B Orders:</span>
+                <span className="font-medium">{formatCurrency(fnbTotal)}</span>
+              </div>
+              {formData.fnbAmount > 0 && (
+                <div className="flex justify-between">
+                  <span>Additional F&B:</span>
+                  <span className="font-medium">{formatCurrency(formData.fnbAmount)}</span>
+                </div>
+              )}
+              <Separator />
+              <div className="flex justify-between text-lg font-bold">
+                <span>Grand Total:</span>
+                <span>{formatCurrency(grandTotal)}</span>
               </div>
             </div>
           </div>
 
-          {/* F&B Orders */}
-          {fetchingFnb ? (
-            <div className="bg-blue-50 p-4 rounded-lg">
-              <div className="flex items-center">
-                <Coffee className="w-4 h-4 mr-2 text-blue-600" />
-                <span className="text-sm text-blue-700">Loading F&B orders...</span>
-              </div>
-            </div>
-          ) : attachedFnbOrders.length > 0 ? (
-            <div className="bg-blue-50 p-4 rounded-lg space-y-3">
-              <div className="flex items-center">
-                <ShoppingBag className="w-4 h-4 mr-2 text-blue-600" />
-                <h4 className="font-medium text-blue-900">Attached F&B Orders</h4>
-              </div>
-              
-              <div className="space-y-2">
-                {attachedFnbOrders.map((order) => (
-                  <div key={order.id} className="bg-white p-3 rounded border">
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="text-sm font-medium">Order #{order.id.slice(-6)}</span>
-                      <span className="text-sm font-bold text-blue-600">
-                        {formatCurrency(order.totalAmount)}
-                      </span>
-                    </div>
-                    <div className="space-y-1">
-                      {order.items.map((item) => (
-                        <div key={item.id} className="flex justify-between text-xs text-gray-600">
-                          <span>{item.quantity}x {item.name}</span>
-                          <span>{formatCurrency(item.totalPrice)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-                
-                <div className="flex justify-between items-center pt-2 border-t">
-                  <span className="text-sm font-medium text-blue-900">Total F&B Attached:</span>
-                  <span className="text-sm font-bold text-blue-600">
-                    {formatCurrency(totalAttachedFnb)}
-                  </span>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="bg-gray-50 p-3 rounded-lg">
-              <div className="flex items-center text-gray-600">
-                <Coffee className="w-4 h-4 mr-2" />
-                <span className="text-sm">No F&B orders attached to this session</span>
-              </div>
-            </div>
-          )}
-
           {/* Payment Method */}
-          <div className="space-y-2">
+          <div className="space-y-3">
             <Label>Payment Method</Label>
             <Select 
               value={formData.paymentMethod} 
@@ -422,24 +479,21 @@ export function StopSessionDialog({
 
           {/* Additional F&B Amount */}
           <div className="space-y-2">
-            <Label htmlFor="fnb">Additional F&B Amount (Optional)</Label>
-            <div className="relative">
-              <Input
-                id="fnb"
-                type="number"
-                placeholder="0"
-                min="0"
-                step="1000"
-                value={formData.fnbAmount || ''}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => 
-                  setFormData(prev => ({ ...prev, fnbAmount: parseFloat(e.target.value) || 0 }))
-                }
-                className="pl-8"
-              />
-              <Coffee className="w-4 h-4 absolute left-2.5 top-3 text-gray-400" />
-            </div>
-            <p className="text-xs text-gray-500">
-              Add manual F&B charges not in the attached orders
+            <Label htmlFor="fnbAmount">Additional F&B Amount</Label>
+            <Input
+              id="fnbAmount"
+              type="number"
+              placeholder="0"
+              value={formData.fnbAmount || ''}
+              onChange={(e) => 
+                setFormData(prev => ({ 
+                  ...prev, 
+                  fnbAmount: Math.max(0, parseInt(e.target.value) || 0)
+                }))
+              }
+            />
+            <p className="text-xs text-gray-600">
+              Add any additional F&B purchases not recorded in the system
             </p>
           </div>
 
@@ -448,85 +502,40 @@ export function StopSessionDialog({
             <Label htmlFor="notes">Notes (Optional)</Label>
             <Textarea
               id="notes"
-              placeholder="Any additional notes..."
+              placeholder="Add any notes about this session..."
               value={formData.notes}
-              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => 
+              onChange={(e) => 
                 setFormData(prev => ({ ...prev, notes: e.target.value }))
               }
-              rows={2}
+              rows={3}
             />
-          </div>
-
-          <Separator />
-
-          {/* Payment Breakdown */}
-          <div className="bg-green-50 p-4 rounded-lg space-y-2">
-            <h4 className="font-medium text-green-900 mb-3">Payment Breakdown</h4>
-            
-            <div className="space-y-1 text-sm">
-              {/* Session Cost */}
-              <div className="flex items-center justify-between">
-                <span className="text-gray-600">Session ({session.billingModel}):</span>
-                <span className="font-medium">
-                  {formatCurrency(sessionCosts.baseCost)}
-                </span>
-              </div>
-              
-              {/* Overtime if any */}
-              {sessionCosts.overtimeCost > 0 && (
-                <div className="flex items-center justify-between">
-                  <span className="text-red-600">Overtime:</span>
-                  <span className="font-medium text-red-600">
-                    {formatCurrency(sessionCosts.overtimeCost)}
-                  </span>
-                </div>
-              )}
-              
-              {/* Attached F&B */}
-              {totalAttachedFnb > 0 && (
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-600">F&B (Attached):</span>
-                  <span className="font-medium">
-                    {formatCurrency(totalAttachedFnb)}
-                  </span>
-                </div>
-              )}
-              
-              {/* Manual F&B */}
-              {formData.fnbAmount > 0 && (
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-600">F&B (Additional):</span>
-                  <span className="font-medium">
-                    {formatCurrency(formData.fnbAmount)}
-                  </span>
-                </div>
-              )}
-            </div>
-            
-            <Separator />
-            
-            <div className="flex items-center justify-between">
-              <span className="font-medium text-green-900">Final Total:</span>
-              <span className="text-lg font-bold text-green-600">
-                {formatCurrency(finalTotal)}
-              </span>
-            </div>
           </div>
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={handleCancel} disabled={loading}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={loading}
+          >
             Cancel
           </Button>
-          <Button 
-            onClick={handleSubmit} 
+          <Button
+            type="button"
+            onClick={handleSubmit}
             disabled={loading}
             className="bg-red-600 hover:bg-red-700"
           >
-            {loading ? 'Processing...' : (
+            {loading ? (
               <>
-                <Receipt className="w-4 h-4 mr-2" />
-                Stop & Process Payment
+                <div className="w-4 h-4 animate-spin rounded-full border-2 border-white border-t-transparent mr-2" />
+                Processing...
+              </>
+            ) : (
+              <>
+                <StopCircle className="w-4 h-4 mr-2" />
+                Stop Session & Process Payment
               </>
             )}
           </Button>
