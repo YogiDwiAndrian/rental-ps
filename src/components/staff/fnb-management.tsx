@@ -1,4 +1,4 @@
-// src/components/staff/fnb-management.tsx - ORIGINAL LAYOUT + MINIMAL FIXES
+// src/components/staff/fnb-management.tsx - Fixed API Endpoints & Error Handling
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
@@ -26,7 +26,7 @@ import { toast } from 'sonner'
 import { FnbOrderStatusDialog } from './fnb-order-status-dialog'
 
 // ============================================
-// TYPES - ORIGINAL + FIX startTime
+// TYPES - Updated with Unit Name
 // ============================================
 
 interface FnbItem {
@@ -35,10 +35,10 @@ interface FnbItem {
   description?: string
   price: number
   stockQuantity: number
+  minStockAlert: number
   unitType: string
   categoryName: string
   isAvailable: boolean
-  minStockAlert: number
 }
 
 interface FnbCategory {
@@ -61,6 +61,7 @@ interface FnbOrder {
   status: 'pending' | 'completed' | 'cancelled'
   paymentTiming: 'immediate' | 'end_of_session'
   rentalSessionId?: string
+  unitName?: string  // Unit name for session attached orders
   customerName?: string
   notes?: string
   createdAt: string
@@ -70,86 +71,104 @@ interface ActiveSession {
   id: string
   unitName: string
   customerName?: string
-  startTime: string  // FIX: Add startTime field
+  startTime: string
 }
 
-// FIX: Add callback props
 interface FnbManagementProps {
   locationId: string
   activeSessions: ActiveSession[]
   onCreateOrder?: () => void
-  onRefresh?: () => void  // FIX: Add refresh callback
-  refreshSessions?: () => Promise<void>  // FIX: Add sessions refresh
+  onRefresh?: () => void
+  refreshSessions?: () => void
 }
 
 interface FnbData {
   categories: FnbCategory[]
   recentOrders: FnbOrder[]
-  lowStockItems: FnbItem[]
   todayStats: {
-    totalOrders: number
     totalRevenue: number
-    pendingOrders: number
+    totalOrders: number
   }
+  lowStockItems: FnbItem[]
 }
 
 // ============================================
-// COMPONENT - ORIGINAL LAYOUT
+// MAIN COMPONENT
 // ============================================
 
 export function FnbManagement({ 
   locationId, 
-  activeSessions,
-  onCreateOrder,
-  onRefresh,  // FIX: Accept callback
-  refreshSessions  // FIX: Accept sessions refresh
+  activeSessions, 
+  onCreateOrder, 
+  onRefresh,
+  refreshSessions 
 }: FnbManagementProps) {
   const router = useRouter()
+  const [loading, setLoading] = useState(true)
+  const [selectedOrder, setSelectedOrder] = useState<FnbOrder | undefined>()
+  const [statusDialogOpen, setStatusDialogOpen] = useState(false)
+  
   const [fnbData, setFnbData] = useState<FnbData>({
     categories: [],
     recentOrders: [],
-    lowStockItems: [],
-    todayStats: {
-      totalOrders: 0,
-      totalRevenue: 0,
-      pendingOrders: 0
-    }
+    todayStats: { totalRevenue: 0, totalOrders: 0 },
+    lowStockItems: []
   })
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [selectedOrder, setSelectedOrder] = useState<FnbOrder | undefined>()
-  const [statusDialogOpen, setStatusDialogOpen] = useState(false)
 
   // ============================================
-  // DATA FETCHING - ORIGINAL
+  // DATA FETCHING - Fixed API Endpoints
   // ============================================
 
   const fetchFnbData = useCallback(async () => {
     try {
       setLoading(true)
-      setError(null)
+      
+      // Use the correct API endpoints that exist in the project
+      const [dashboardRes, ordersRes] = await Promise.all([
+        fetch(`/api/dashboard/locations/${locationId}/fnb`),
+        fetch(`/api/fnb/orders?limit=10`, {
+          headers: { 'X-Location-ID': locationId }
+        })
+      ])
 
-      const response = await fetch(`/api/dashboard/locations/${locationId}/fnb`, {
-        headers: {
-          'X-Location-ID': locationId
-        }
+      console.log('📊 Dashboard API Status:', dashboardRes.status)
+      console.log('📦 Orders API Status:', ordersRes.status)
+
+      if (!dashboardRes.ok) {
+        console.error('Dashboard API failed:', dashboardRes.status, dashboardRes.statusText)
+        throw new Error(`Dashboard API failed: ${dashboardRes.status}`)
+      }
+
+      if (!ordersRes.ok) {
+        console.error('Orders API failed:', ordersRes.status, ordersRes.statusText)
+        throw new Error(`Orders API failed: ${ordersRes.status}`)
+      }
+
+      const [dashboardData, ordersData] = await Promise.all([
+        dashboardRes.json(),
+        ordersRes.json()
+      ])
+
+      console.log('📊 Dashboard Response:', dashboardData)
+      console.log('📦 Orders Response:', ordersData)
+      
+      // Handle API response structure
+      const fnbDashboard = dashboardData?.data || {}
+      const ordersResult = ordersData?.data || []
+      
+      setFnbData({
+        categories: fnbDashboard.categories || [],
+        recentOrders: ordersResult,
+        todayStats: {
+          totalRevenue: fnbDashboard.todayStats?.totalRevenue || 0,
+          totalOrders: fnbDashboard.todayStats?.totalOrders || 0
+        },
+        lowStockItems: fnbDashboard.lowStockItems || []
       })
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch F&B data: ${response.statusText}`)
-      }
-
-      const data = await response.json()
-      
-      if (data.success) {
-        setFnbData(data.data)
-      } else {
-        throw new Error(data.error || 'Failed to load F&B data')
-      }
     } catch (err) {
       console.error('Error fetching F&B data:', err)
-      setError(err instanceof Error ? err.message : 'Failed to load F&B data')
-      toast.error('Failed to load F&B data')
+      toast.error(err instanceof Error ? err.message : 'Failed to load F&B data')
     } finally {
       setLoading(false)
     }
@@ -166,7 +185,7 @@ export function FnbManagement({
   }, [fetchFnbData])
 
   // ============================================
-  // ORDER STATUS MANAGEMENT - ORIGINAL
+  // ORDER STATUS MANAGEMENT
   // ============================================
 
   const getOrderStatusColor = (status: FnbOrder['status']) => {
@@ -214,12 +233,11 @@ export function FnbManagement({
   }
 
   // ============================================
-  // EVENT HANDLERS - FIX: Use callbacks
+  // EVENT HANDLERS
   // ============================================
 
   const handleRefresh = useCallback(async () => {
     await fetchFnbData()
-    // FIX: Use callback if provided
     if (onRefresh) {
       await onRefresh()
     } else {
@@ -266,7 +284,6 @@ export function FnbManagement({
       toast.success(`Order ${newStatus}!`)
       await fetchFnbData()
 
-      // FIX: Call refresh callback
       if (onRefresh) {
         await onRefresh()
       }
@@ -284,7 +301,6 @@ export function FnbManagement({
 
   const handleStatusDialogSuccess = async () => {
     await fetchFnbData()
-    // FIX: Call refresh callback
     if (onRefresh) {
       await onRefresh()
     }
@@ -293,7 +309,7 @@ export function FnbManagement({
   }
 
   // ============================================
-  // UTILS - ORIGINAL
+  // UTILITY FUNCTIONS
   // ============================================
 
   const formatCurrency = (amount: number): string => {
@@ -305,7 +321,21 @@ export function FnbManagement({
   }
 
   // ============================================
-  // RENDER - ORIGINAL LAYOUT
+  // RENDER SESSION BADGE - With Unit Name
+  // ============================================
+
+  const renderSessionBadge = (order: FnbOrder) => {
+    if (!order.rentalSessionId) return null
+
+    return (
+      <Badge variant="outline" className="text-xs bg-blue-50 border-blue-200 text-blue-800">
+        {order.unitName ? `Session Attached - ${order.unitName}` : 'Session Attached'}
+      </Badge>
+    )
+  }
+
+  // ============================================
+  // RENDER COMPONENT
   // ============================================
 
   return (
@@ -329,98 +359,85 @@ export function FnbManagement({
                 {fnbData.todayStats.totalOrders} orders
               </p>
             </div>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Pending:</span>
-              <Badge variant="outline" className="text-xs">
-                {fnbData.todayStats.pendingOrders}
-              </Badge>
+            <div className="flex space-x-2">
+              <Button 
+                size="sm" 
+                onClick={handleCreateStandaloneOrder}
+                className="flex-1"
+              >
+                <Plus className="w-3 h-3 mr-1" />
+                New Order
+              </Button>
+              <Button 
+                size="sm" 
+                variant="outline" 
+                onClick={handleRefresh}
+                className="px-2"
+              >
+                <RefreshCw className={cn("w-3 h-3", loading && "animate-spin")} />
+              </Button>
             </div>
           </CardContent>
         </Card>
 
         {/* Low Stock Alert */}
         {fnbData.lowStockItems.length > 0 && (
-          <Card className="border-red-200">
+          <Card className="border-orange-200 bg-orange-50">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-red-800">Low Stock Alert</CardTitle>
-              <AlertTriangle className="h-4 w-4 text-red-600" />
+              <CardTitle className="text-sm font-medium text-orange-800">Low Stock Alert</CardTitle>
+              <AlertTriangle className="h-4 w-4 text-orange-600" />
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
                 {fnbData.lowStockItems.slice(0, 3).map((item) => (
-                  <div key={item.id} className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-medium">{item.name}</p>
-                      <p className="text-xs text-red-600">
-                        {item.stockQuantity} {item.unitType} left
-                      </p>
-                    </div>
-                    <Badge variant="destructive" className="text-xs">
-                      Low
+                  <div key={item.id} className="flex justify-between items-center text-sm">
+                    <span className="text-orange-800 font-medium">{item.name}</span>
+                    <Badge variant="outline" className="text-xs border-orange-300 text-orange-700">
+                      {item.stockQuantity} {item.unitType}
                     </Badge>
                   </div>
                 ))}
                 {fnbData.lowStockItems.length > 3 && (
-                  <p className="text-xs text-red-600">
+                  <p className="text-xs text-orange-600 text-center">
                     +{fnbData.lowStockItems.length - 3} more items
                   </p>
                 )}
               </div>
+              <Button 
+                size="sm" 
+                variant="outline" 
+                className="w-full mt-3 border-orange-300 text-orange-700 hover:bg-orange-100"
+                onClick={handleViewInventory}
+              >
+                <Coffee className="w-3 h-3 mr-1" />
+                Manage Stock
+              </Button>
             </CardContent>
           </Card>
         )}
-
-        {/* Quick Actions */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Quick Actions</CardTitle>
-            <ShoppingCart className="h-4 w-4 text-purple-600" />
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <Button 
-              onClick={handleCreateStandaloneOrder}
-              size="sm" 
-              className="w-full"
-            >
-              <Plus className="w-3 h-3 mr-2" />
-              New F&B Order
-            </Button>
-            <Button 
-              onClick={handleViewInventory}
-              variant="outline" 
-              size="sm" 
-              className="w-full"
-            >
-              <Eye className="w-3 h-3 mr-2" />
-              View Inventory
-            </Button>
-          </CardContent>
-        </Card>
       </div>
 
-      {/* ===== MAIN F&B MANAGEMENT SECTION ===== */}
-      <div className="lg:col-span-3">
+      {/* ===== MAIN CONTENT - RECENT ORDERS & ACTIVE SESSIONS ===== */}
+      <div className="lg:col-span-3 space-y-6">
+        
+        {/* Recent Orders Section */}
         <Card>
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center">
-                <Coffee className="w-5 h-5 mr-2" />
-                F&B Order Management
-              </CardTitle>
-              <Button
-                onClick={handleRefresh}
-                variant="outline"
-                size="sm"
-                disabled={loading}
-              >
-                <RefreshCw className={cn("w-4 h-4 mr-2", loading && "animate-spin")} />
-                Refresh
-              </Button>
-            </div>
+            <CardTitle className="flex items-center justify-between">
+              <span className="flex items-center">
+                <Clock className="w-5 h-5 mr-2" />
+                Recent F&B Orders
+              </span>
+              <Badge variant="secondary">{fnbData.recentOrders.length}</Badge>
+            </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-6">
-            {/* Recent Orders Section */}
-            {fnbData.recentOrders.length > 0 ? (
+          <CardContent>
+            {loading ? (
+              <div className="text-center py-8">
+                <RefreshCw className="w-8 h-8 mx-auto mb-4 text-gray-400 animate-spin" />
+                <p className="text-gray-600">Loading F&B orders...</p>
+              </div>
+            ) : fnbData.recentOrders.length > 0 ? (
               <div>
                 <h3 className="font-medium mb-4 flex items-center">
                   <Clock className="w-4 h-4 mr-2" />
@@ -434,16 +451,13 @@ export function FnbManagement({
                         className="flex items-center justify-between p-3 border rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors"
                       >
                         <div className="flex-1">
-                          <div className="flex items-center space-x-2 mb-1">
+                          <div className="flex items-center space-x-2 mb-1 flex-wrap">
                             <Badge className={getOrderStatusColor(order.status)}>
                               {getStatusIcon(order.status)}
                               <span className="ml-1">{getOrderStatusText(order.status)}</span>
                             </Badge>
-                            {order.rentalSessionId && (
-                              <Badge variant="outline" className="text-xs">
-                                Session Attached
-                              </Badge>
-                            )}
+                            {/* Session Badge with Unit Name */}
+                            {renderSessionBadge(order)}
                           </div>
                           <div className="text-sm">
                             <p className="font-medium">
@@ -484,6 +498,28 @@ export function FnbManagement({
                 <Package2 className="w-12 h-12 mx-auto mb-4 text-gray-400" />
                 <h3 className="text-lg font-medium text-gray-900 mb-2">No Recent Orders</h3>
                 <p className="text-gray-600 mb-4">Start taking F&B orders to see them here</p>
+                
+                {/* Debug info for development */}
+                {process.env.NODE_ENV === 'development' && (
+                  <details className="text-left text-xs text-gray-500 mt-4 border rounded p-2">
+                    <summary className="cursor-pointer font-medium">🔍 Debug Info</summary>
+                    <pre className="mt-2 bg-gray-100 p-2 rounded text-left overflow-auto whitespace-pre-wrap">
+                      {JSON.stringify({
+                        locationId,
+                        categoriesCount: fnbData.categories.length,
+                        ordersCount: fnbData.recentOrders.length,
+                        todayStats: fnbData.todayStats,
+                        lowStockCount: fnbData.lowStockItems.length,
+                        loading,
+                        apiEndpoints: [
+                          `/api/dashboard/locations/${locationId}/fnb`,
+                          `/api/fnb/orders?limit=10`
+                        ]
+                      }, null, 2)}
+                    </pre>
+                  </details>
+                )}
+                
                 <Button onClick={handleCreateStandaloneOrder}>
                   <Plus className="w-4 h-4 mr-2" />
                   Create First Order
@@ -520,38 +556,20 @@ export function FnbManagement({
                 </div>
               </div>
             )}
-
-            {/* Error State */}
-            {error && (
-              <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-                <div className="flex items-center text-red-800">
-                  <AlertTriangle className="w-4 h-4 mr-2" />
-                  <span className="text-sm font-medium">Error loading F&B data</span>
-                </div>
-                <p className="text-sm text-red-600 mt-1">{error}</p>
-                <Button
-                  onClick={handleRefresh}
-                  variant="outline"
-                  size="sm"
-                  className="mt-2"
-                >
-                  <RefreshCw className="w-3 h-3 mr-1" />
-                  Retry
-                </Button>
-              </div>
-            )}
           </CardContent>
         </Card>
       </div>
 
-      {/* Status Dialog */}
-      <FnbOrderStatusDialog
-        open={statusDialogOpen}
-        onOpenChange={setStatusDialogOpen}
-        order={selectedOrder}
-        locationId={locationId}
-        onSuccess={handleStatusDialogSuccess}
-      />
+      {/* Order Status Dialog */}
+      {selectedOrder && (
+        <FnbOrderStatusDialog
+          order={selectedOrder}
+          open={statusDialogOpen}
+          onOpenChange={setStatusDialogOpen}
+          onSuccess={handleStatusDialogSuccess}
+          locationId={locationId}
+        />
+      )}
     </div>
   )
 }
