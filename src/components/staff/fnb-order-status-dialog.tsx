@@ -1,4 +1,4 @@
-// src/components/staff/fnb-order-status-dialog.tsx - FIXED logic and improved wording
+// src/components/staff/fnb-order-status-dialog.tsx - FIXED with stockRestored field
 'use client'
 
 import { useState } from 'react'
@@ -35,6 +35,7 @@ import {
   Package
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { Card } from '../ui/card'
 
 // ============================================
 // TYPES
@@ -60,10 +61,11 @@ interface FnbOrder {
   createdAt: string
   createdBy?: string
   createdByName?: string
-  cancellationReason?: string    // NEW: Reason for cancellation
-  cancelledAt?: string          // NEW: When was it cancelled  
-  cancelledBy?: string          // NEW: User ID who cancelled
-  cancelledByName?: string      // NEW: Name of user who cancelled
+  cancellationReason?: string
+  cancelledAt?: string
+  cancelledBy?: string
+  cancelledByName?: string
+  stockRestored?: boolean  // NEW: Add stockRestored field
 }
 
 interface FnbOrderStatusDialogProps {
@@ -93,10 +95,6 @@ const formatCurrency = (amount: number): string => {
   }).format(amount)
 }
 
-// ============================================
-// IMPROVED STATUS SYSTEM - Better Wording
-// ============================================
-
 const getStatusColor = (status: FnbOrder['status']) => {
   const statusColors = {
     pending: 'bg-orange-100 text-orange-800 border-orange-200',
@@ -111,7 +109,7 @@ const getStatusIcon = (status: FnbOrder['status']) => {
     case 'pending':
       return <Clock className="w-4 h-4" />
     case 'completed':
-      return <DollarSign className="w-4 h-4" />  // Changed from CheckCircle2 to DollarSign
+      return <DollarSign className="w-4 h-4" />
     case 'cancelled':
       return <XCircle className="w-4 h-4" />
     default:
@@ -119,39 +117,32 @@ const getStatusIcon = (status: FnbOrder['status']) => {
   }
 }
 
-// IMPROVED: Better wording for F&B order statuses
 const getStatusLabel = (status: FnbOrder['status']) => {
   const statusLabels = {
-    pending: 'Belum Dibayar',        // Instead of "Pending"
-    completed: 'Sudah Dibayar',      // Instead of "Completed"  
-    cancelled: 'Pesanan Dibatal'     // Instead of "Cancelled"
+    pending: 'Belum Dibayar',
+    completed: 'Sudah Dibayar',
+    cancelled: 'Pesanan Dibatal'
   }
   return statusLabels[status] || status
 }
 
-// FIXED: Proper status transitions - completed orders cannot be cancelled
 const getAvailableTransitions = (currentStatus: FnbOrder['status']): FnbOrder['status'][] => {
   switch (currentStatus) {
     case 'pending':
-      return ['completed', 'cancelled']  // From pending: can be paid or cancelled
+      return ['completed', 'cancelled']
     case 'completed':
-      return []  // FIXED: Completed orders cannot be changed (payment already done)
+      return [] // Completed orders cannot be changed
     case 'cancelled':
-      return []  // Cancelled orders cannot be changed
+      return [] // Cancelled orders cannot be changed
     default:
       return []
   }
 }
 
-// ============================================
-// DATE VALIDATION FUNCTIONS
-// ============================================
-
 const isOrderTooOld = (createdAt: string): boolean => {
   const orderDate = new Date(createdAt)
   const now = new Date()
   const diffInHours = (now.getTime() - orderDate.getTime()) / (1000 * 60 * 60)
-  
   return diffInHours > 24
 }
 
@@ -192,15 +183,10 @@ export function FnbOrderStatusDialog({
 
   if (!order) return null
 
-  // ===== DATE VALIDATION =====
   const orderTooOld = isOrderTooOld(order.createdAt)
   const orderAge = getOrderAge(order.createdAt)
-
   const availableStatuses = getAvailableTransitions(order.status)
-  
-  // Status changes possible only if not too old AND has available transitions
   const isStatusChangePossible = availableStatuses.length > 0 && !orderTooOld
-  
   const isCancellation = formData.newStatus === 'cancelled'
   const isPaid = order.status === 'completed'
 
@@ -261,130 +247,102 @@ export function FnbOrderStatusDialog({
     }
   }
 
-  const handleCancel = () => {
-    setFormData({
-      newStatus: order.status,
-      reason: '',
-      restoreStock: true,
-      notes: ''
-    })
-    onOpenChange(false)
-  }
-
   // ============================================
   // RENDER
   // ============================================
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center">
             <Coffee className="w-5 h-5 mr-2" />
-            Status Pesanan F&B
+            Detail Pesanan F&B
           </DialogTitle>
           <DialogDescription>
-            Kelola status pembayaran dan pesanan F&B
+            Kelola status pesanan dan pembayaran F&B
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           {/* Order Summary */}
-          <div className="bg-gray-50 p-4 rounded-lg space-y-3">
-            <div className="flex items-center justify-between">
-              <h4 className="font-medium text-gray-900">Order #{order.id.slice(-8)}</h4>
-              <Badge className={getStatusColor(order.status)}>
-                {getStatusIcon(order.status)}
-                <span className="ml-1">{getStatusLabel(order.status)}</span>
-              </Badge>
-            </div>
-            
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-gray-600">Items:</span>
-                <span>{order.items.map(item => `${item.quantity}x ${item.fnbItemName}`).join(', ')}</span>
+          <Card className="p-4 bg-gray-50">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">Status Saat Ini</span>
+                <Badge className={getStatusColor(order.status)}>
+                  {getStatusIcon(order.status)}
+                  <span className="ml-1">{getStatusLabel(order.status)}</span>
+                </Badge>
               </div>
-              
-              <div className="flex justify-between">
-                <span className="text-gray-600">Total:</span>
-                <span className="font-semibold">{formatCurrency(order.totalAmount)}</span>
+              <div className="flex items-center justify-between">
+                <span className="text-sm">Total Pesanan</span>
+                <span className="font-medium">{formatCurrency(order.totalAmount)}</span>
               </div>
-              
-              <div className="flex justify-between">
-                <span className="text-gray-600">Pembayaran:</span>
-                <span className={isPaid ? 'text-green-600' : 'text-orange-600'}>
-                  {isPaid ? 'Sudah Dibayar' : 'Belum Dibayar'}
-                  {order.paymentTiming === 'end_of_session' && ' (Bayar Akhir Session)'}
-                </span>
+              <div className="flex items-center justify-between">
+                <span className="text-sm">Jumlah Item</span>
+                <span className="font-medium">{order.items.length} items</span>
               </div>
-
-              {order.rentalSessionId && (
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Session:</span>
-                  <span>{order.customerName || 'Terlampir'}</span>
+              {order.customerName && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Customer</span>
+                  <span className="font-medium">{order.customerName}</span>
                 </div>
               )}
-
-              {order.createdByName && (
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Dibuat oleh:</span>
-                  <span className="flex items-center">
-                    <User className="w-3 h-3 mr-1" />
-                    {order.createdByName}
-                  </span>
-                </div>
-              )}
-
-              {/* NEW: Show cancellation info if order is cancelled */}
-              {order.status === 'cancelled' && order.cancellationReason && (
-                <div className="mt-2 p-2 bg-red-50 rounded border border-red-200">
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Alasan Dibatal:</span>
-                    <span className="text-red-600 font-medium">{order.cancellationReason}</span>
-                  </div>
-                  {order.cancelledByName && (
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Dibatal oleh:</span>
-                      <span className="flex items-center text-red-600">
-                        <User className="w-3 h-3 mr-1" />
-                        {order.cancelledByName}
+              
+              {/* Show cancellation info if cancelled */}
+              {order.status === 'cancelled' && (
+                <div className="pt-2 border-t space-y-1">
+                  {order.cancellationReason && (
+                    <div className="flex items-start justify-between">
+                      <span className="text-sm text-red-600">Alasan Dibatal</span>
+                      <span className="text-sm text-red-800 font-medium text-right max-w-48">
+                        {order.cancellationReason}
                       </span>
                     </div>
                   )}
-                  {order.cancelledAt && (
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Waktu Dibatal:</span>
-                      <span className="text-red-600">{new Date(order.cancelledAt).toLocaleString('id-ID')}</span>
+                  {order.cancelledByName && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-red-600">Dibatal Oleh</span>
+                      <span className="text-sm text-red-800">{order.cancelledByName}</span>
+                    </div>
+                  )}
+                  {/* NEW: Show stock restoration status */}
+                  {order.stockRestored !== undefined && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-red-600">Status Stok</span>
+                      <Badge 
+                        variant="outline"
+                        className={
+                          order.stockRestored 
+                            ? "bg-blue-100 text-blue-800 border-blue-200" 
+                            : "bg-gray-100 text-gray-600 border-gray-200"
+                        }
+                      >
+                        <Package className="w-3 h-3 mr-1" />
+                        {order.stockRestored ? "Dikembalikan" : "Tidak Dikembalikan"}
+                      </Badge>
                     </div>
                   )}
                 </div>
               )}
-              
-              <div className="flex justify-between">
-                <span className="text-gray-600">Dibuat:</span>
-                <span className={orderTooOld ? 'text-red-600 font-medium' : ''}>
-                  {new Date(order.createdAt).toLocaleString('id-ID')} ({orderAge})
-                </span>
-              </div>
+            </div>
+          </Card>
+
+          {/* Order Items */}
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">Item Pesanan</Label>
+            <div className="max-h-32 overflow-y-auto space-y-1">
+              {order.items.map((item) => (
+                <div key={item.id} className="flex justify-between items-center text-sm bg-white p-2 rounded border">
+                  <span>{item.fnbItemName}</span>
+                  <span>{item.quantity}x {formatCurrency(item.unitPrice)}</span>
+                </div>
+              ))}
             </div>
           </div>
 
-          {/* Payment Status Information */}
-          {order.status === 'completed' && (
-            <Alert>
-              <DollarSign className="h-4 w-4" />
-              <AlertDescription>
-                <div className="space-y-1">
-                  <p className="font-medium">Pesanan Sudah Dibayar</p>
-                  <p className="text-sm">
-                    Pesanan yang sudah dibayar tidak dapat diubah statusnya.
-                  </p>
-                </div>
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {/* DATE RESTRICTION ALERT */}
+          {/* Date restriction alert */}
           {orderTooOld && (
             <Alert variant="destructive">
               <CalendarX className="h-4 w-4" />
@@ -449,68 +407,59 @@ export function FnbOrderStatusDialog({
                       placeholder="Mengapa pesanan ini dibatalkan?"
                       value={formData.reason}
                       onChange={(e) => setFormData(prev => ({ ...prev, reason: e.target.value }))}
-                      rows={2}
-                      className="border-red-200"
+                      className="border-red-200 focus:border-red-400"
                       disabled={loading}
                     />
                   </div>
-
+                  
                   <div className="flex items-center space-x-2">
                     <input
                       type="checkbox"
                       id="restoreStock"
                       checked={formData.restoreStock}
                       onChange={(e) => setFormData(prev => ({ ...prev, restoreStock: e.target.checked }))}
-                      className="rounded"
+                      className="rounded border-red-300"
                       disabled={loading}
                     />
-                    <Label htmlFor="restoreStock" className="text-sm text-red-700">
-                      Kembalikan stok barang
+                    <Label htmlFor="restoreStock" className="text-red-700 text-sm">
+                      Kembalikan stok item ke inventory
                     </Label>
                   </div>
                 </div>
               )}
 
-              {/* Additional Notes */}
+              {/* Notes */}
               <div className="space-y-2">
                 <Label htmlFor="notes">Catatan Tambahan (Opsional)</Label>
                 <Textarea
                   id="notes"
-                  placeholder="Tambahkan catatan jika diperlukan..."
+                  placeholder="Catatan internal atau informasi tambahan..."
                   value={formData.notes}
                   onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
-                  rows={2}
                   disabled={loading}
                 />
               </div>
             </div>
           ) : (
-            <div className="text-center py-4 text-gray-500">
-              {orderTooOld ? (
-                <>
-                  <CalendarX className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                  <p className="text-sm font-medium">Periode perubahan telah berakhir</p>
-                  <p className="text-xs mt-1">Pesanan hanya bisa diubah dalam 24 jam sejak dibuat</p>
-                </>
-              ) : order.status === 'completed' ? (
-                <>
-                  <DollarSign className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                  <p className="text-sm font-medium">Pesanan sudah dibayar</p>
-                  <p className="text-xs mt-1">Pesanan yang sudah dibayar tidak dapat diubah</p>
-                </>
-              ) : (
-                <>
-                  <Package className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                  <p className="text-sm">Tidak ada perubahan status yang tersedia</p>
-                </>
-              )}
-            </div>
+            <Alert>
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription>
+                {orderTooOld 
+                  ? `Pesanan ini sudah terlalu lama (${orderAge}) dan tidak dapat diubah.`
+                  : `Status pesanan "${getStatusLabel(order.status)}" tidak dapat diubah lagi.`
+                }
+              </AlertDescription>
+            </Alert>
           )}
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={handleCancel} disabled={loading}>
-            {orderTooOld || !isStatusChangePossible ? 'Tutup' : 'Batal'}
+          <Button 
+            variant="outline" 
+            onClick={() => onOpenChange(false)}
+            disabled={loading}
+          >
+            {isStatusChangePossible ? 'Batal' : 'Tutup'}
           </Button>
           {isStatusChangePossible && (
             <Button 

@@ -38,6 +38,10 @@ export interface ApiFnbOrder {
   paidAt?: string
   transactions?: FnbOrderTransaction[]
   paymentTiming?: 'immediate' | 'end_of_session'
+  cancellationReason?: string
+  cancelledAt?: string
+  cancelledByName?: string
+  stockRestored?: boolean
 }
 
 export interface GetSessionFnbOrdersResponse extends BaseApiResponse {

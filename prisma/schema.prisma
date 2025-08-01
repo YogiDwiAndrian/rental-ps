@@ -506,6 +506,7 @@ model FnbOrder {
   cancellationReason String?   @map("cancellation_reason")
   cancelledAt        DateTime? @map("cancelled_at")
   cancelledBy        String?   @map("cancelled_by")
+  stockRestored      Boolean?  @map("stock_restored")
   totalAmount        Decimal   @map("total_amount") @db.Decimal(10, 2)
   status             String    @default("completed")
   createdAt          DateTime  @default(now()) @map("created_at")

@@ -258,11 +258,11 @@ CREATE TABLE "fnb_orders" (
     "cancellation_reason" TEXT,
     "cancelled_at" TIMESTAMP(3),
     "cancelled_by" TEXT,
+    "stock_restored" BOOLEAN,
     "total_amount" DECIMAL(10,2) NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'completed',
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
-    "userId" TEXT,
 
     CONSTRAINT "fnb_orders_pkey" PRIMARY KEY ("id")
 );
@@ -556,9 +556,6 @@ ALTER TABLE "fnb_orders" ADD CONSTRAINT "fnb_orders_created_by_fkey" FOREIGN KEY
 
 -- AddForeignKey
 ALTER TABLE "fnb_orders" ADD CONSTRAINT "fnb_orders_cancelled_by_fkey" FOREIGN KEY ("cancelled_by") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "fnb_orders" ADD CONSTRAINT "fnb_orders_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "fnb_order_items" ADD CONSTRAINT "fnb_order_items_fnb_order_id_fkey" FOREIGN KEY ("fnb_order_id") REFERENCES "fnb_orders"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
