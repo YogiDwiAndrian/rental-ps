@@ -1,171 +1,125 @@
-// src/app/api/rentals/active/route.ts - FIXED VERSION
+// src/app/api/rentals/active/route.ts - CLEAN VERSION
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { SessionStatus } from '@prisma/client'
 
-// ============================================
-// TYPES
-// ============================================
-
-interface ActiveSessionResponse {
-  sessionId: string
-  unitId: string
-  unitName: string
-  billingModel: 'timer' | 'hourly' | 'package'
-  startTime: string
-  estimatedEndTime?: string
-  remainingMinutes?: number
-  totalAmount: number
-  isOvertime: boolean
-}
-
-interface GetActiveSessionsResponse {
-  success: boolean
-  data?: ActiveSessionResponse[]
-  error?: string
-  details?: unknown
-}
-
-// ============================================
-// GET HANDLER
-// ============================================
-
-export async function GET(request: NextRequest): Promise<NextResponse<GetActiveSessionsResponse>> {
+export async function GET(request: NextRequest) {
   try {
-    // Check authentication
     const session = await getServerSession(authOptions)
     if (!session?.user) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
-        { status: 401 }
-      )
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Unauthorized' 
+      }, { status: 401 })
     }
 
-    // Get location ID from query params
-    const { searchParams } = new URL(request.url)
+    const searchParams = request.nextUrl.searchParams
     const locationId = searchParams.get('locationId')
 
     if (!locationId) {
-      return NextResponse.json(
-        { success: false, error: 'Location ID is required' },
-        { status: 400 }
-      )
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Location ID is required' 
+      }, { status: 400 })
     }
 
     // Verify user has access to this location
-    if (session.user.role !== 'super_admin') {
-      if (session.user.role === 'owner') {
-        // Owner can access any location in their tenant
-        const location = await prisma.location.findFirst({
-          where: {
-            id: locationId,
-            isActive: true
-          },
-          select: {
-            id: true,
-            tenantId: true
+    const location = await prisma.location.findFirst({
+      where: {
+        id: locationId,
+        tenant: {
+          users: {
+            some: { id: session.user.id }
           }
-        })
-
-        if (!location) {
-          return NextResponse.json(
-            { success: false, error: 'Location not found' },
-            { status: 404 }
-          )
-        }
-
-        if (session.user.tenantId !== location.tenantId) {
-          return NextResponse.json(
-            { success: false, error: 'Access denied to this location' },
-            { status: 403 }
-          )
-        }
-      } else if (session.user.role === 'staff') {
-        // Staff must be assigned to the specific location
-        const hasAccess = await prisma.locationAssignment.findFirst({
-          where: {
-            userId: session.user.id,
-            locationId: locationId,
-            isActive: true
-          }
-        })
-
-        if (!hasAccess) {
-          return NextResponse.json(
-            { success: false, error: 'Access denied to this location' },
-            { status: 403 }
-          )
         }
       }
+    })
+
+    if (!location) {
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Location not found or access denied' 
+      }, { status: 404 })
     }
 
-    // Get active rental sessions with unit details
+    // Fetch active rental sessions with unit data
     const activeSessions = await prisma.rentalSession.findMany({
       where: {
         locationId: locationId,
-        status: SessionStatus.active
+        status: 'active'
       },
       include: {
         unit: {
           select: {
             id: true,
             name: true,
-            customerDisplayName: true,
-            hourlyRate: true
+            hourlyRate: true,
+            customerDisplayName: true
           }
         }
       },
       orderBy: {
-        startTime: 'asc'
+        startTime: 'desc'
       }
     })
 
-    // Transform data for frontend
-    const currentTime = new Date()
-    
-    const transformedSessions: ActiveSessionResponse[] = activeSessions.map(rentalSession => {
-      const startTime = rentalSession.startTime
-      const totalPurchasedDuration = rentalSession.purchasedDuration + rentalSession.extendedDuration
-      const actualDurationMinutes = Math.floor((currentTime.getTime() - startTime.getTime()) / (1000 * 60))
-
-      let estimatedEndTime: string | undefined
+    // Transform sessions to match client interface
+    const transformedSessions = activeSessions.map(session => {
+      // Get hourlyRate from unit (only source available)
+      const hourlyRate = Number(session.unit.hourlyRate)
+      
+      // Calculate current status and remaining time
+      const now = new Date()
+      const startTime = new Date(session.startTime)
+      
+      // Calculate estimated end time if we have purchased duration
+      let estimatedEndTime: Date | undefined
       let remainingMinutes: number | undefined
       let isOvertime = false
-
-      // Calculate estimated end time and remaining minutes for hourly and package modes
-      if (totalPurchasedDuration > 0) {
-        const estimatedEnd = new Date(startTime.getTime() + totalPurchasedDuration * 60 * 1000)
-        estimatedEndTime = estimatedEnd.toISOString()
+      
+      // Only calculate for sessions with purchased duration (hourly/package billing)
+      if (session.purchasedDuration && session.purchasedDuration > 0) {
+        const totalMinutes = session.purchasedDuration + (session.extendedDuration || 0)
+        estimatedEndTime = new Date(startTime.getTime() + totalMinutes * 60 * 1000)
         
-        const remainingMs = estimatedEnd.getTime() - currentTime.getTime()
+        const remainingMs = estimatedEndTime.getTime() - now.getTime()
         remainingMinutes = Math.floor(remainingMs / (1000 * 60))
+        isOvertime = remainingMs < 0
         
-        // Check if session is overtime
-        if (remainingMs < 0) {
-          isOvertime = true
-          remainingMinutes = Math.abs(remainingMinutes) // Convert to positive for display
+        // If overtime, show as positive number
+        if (isOvertime) {
+          remainingMinutes = Math.abs(remainingMinutes)
         }
       }
 
-      // For timer mode, check if session is unusually long (over 12 hours)
-      if (rentalSession.billingModel === 'timer' && actualDurationMinutes > 720) {
-        isOvertime = true
-      }
+      // Debug logging for development
+      console.log('💰 Session Rate Resolution:', {
+        sessionId: session.id,
+        unitName: session.unit.name,
+        hourlyRate: hourlyRate,
+        isOvertime,
+        remainingMinutes
+      })
 
       return {
-        sessionId: rentalSession.id,
-        unitId: rentalSession.unit.id,
-        unitName: rentalSession.unit.customerDisplayName || rentalSession.unit.name,
-        billingModel: rentalSession.billingModel as 'timer' | 'hourly' | 'package',
-        startTime: rentalSession.startTime.toISOString(),
-        estimatedEndTime,
+        sessionId: session.id,
+        unitId: session.unitId,
+        unitName: session.unit.name,
+        billingModel: session.billingModel,
+        startTime: session.startTime.toISOString(),
+        estimatedEndTime: estimatedEndTime?.toISOString(),
         remainingMinutes,
-        totalAmount: parseFloat(rentalSession.totalAmount.toString()),
-        isOvertime
+        totalAmount: session.totalAmount ? Number(session.totalAmount) : undefined,
+        isOvertime,
+        purchasedDuration: session.purchasedDuration,
+        extendedDuration: session.extendedDuration,
+        hourlyRate: hourlyRate,
+        customerName: session.unit.customerDisplayName
       }
     })
+
+    console.log(`📊 Found ${transformedSessions.length} active sessions`)
 
     return NextResponse.json({
       success: true,
@@ -173,15 +127,11 @@ export async function GET(request: NextRequest): Promise<NextResponse<GetActiveS
     })
 
   } catch (error) {
-    console.error('Error fetching active sessions:', error)
+    console.error('❌ Error fetching active sessions:', error)
     
-    return NextResponse.json(
-      { 
-        success: false, 
-        error: 'Failed to fetch active sessions',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      },
-      { status: 500 }
-    )
+    return NextResponse.json({
+      success: false,
+      error: 'Internal server error'
+    }, { status: 500 })
   }
 }

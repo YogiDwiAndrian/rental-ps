@@ -1,4 +1,4 @@
-// src/components/staff/stop-session-dialog.tsx - FIXED React Hooks Rules
+// src/components/staff/stop-session-dialog.tsx - ENHANCED UI/UX VERSION
 'use client'
 
 import { useState, useEffect } from 'react'
@@ -24,6 +24,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Separator } from '@/components/ui/separator'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { 
   StopCircle, 
   CreditCard, 
@@ -33,11 +34,28 @@ import {
   Clock,
   Receipt,
   AlertTriangle,
-  ShoppingBag,
+  CheckCircle2,
   Package,
-  CheckCircle2
+  Timer,
+  Calculator,
+  User,
+  Calendar,
+  TrendingUp,
+  Info,
+  Zap,
+  ShoppingCart,
+  DollarSign,
+  PlayCircle
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { 
+  GetSessionFnbOrdersResponse, 
+  StopSessionRequest, 
+  StopSessionResponse,
+  ApiFnbOrder,
+  isGetSessionFnbOrdersResponse
+} from '@/types/api'
+import { Progress } from '../ui/progress'
 
 // ============================================
 // TYPES
@@ -55,7 +73,18 @@ interface ActiveSession {
   isOvertime: boolean
   purchasedDuration?: number
   extendedDuration?: number
-  hourlyRate: number  // REQUIRED: No fallback, must come from unit data
+  hourlyRate?: number
+  customerName?: string
+}
+
+interface Unit {
+  id: string
+  name: string
+  consoleType: string
+  controllerCount: number
+  status: 'available' | 'occupied' | 'maintenance' | 'broken'
+  hourlyRate: number
+  customerDisplayName?: string
 }
 
 interface FnbOrderItem {
@@ -74,6 +103,7 @@ interface AttachedFnbOrder {
   paymentTiming: 'immediate' | 'end_of_session'
   items: FnbOrderItem[]
   createdAt: string
+  paidAt?: string
 }
 
 interface StopSessionDialogProps {
@@ -81,7 +111,8 @@ interface StopSessionDialogProps {
   onOpenChange: (open: boolean) => void
   session?: ActiveSession
   locationId: string
-  onSuccess?: () => void  // REMOVED: hourlyRate prop - get from session data
+  units: Unit[]
+  onSuccess?: () => void
 }
 
 interface StopFormData {
@@ -102,7 +133,7 @@ const formatCurrency = (amount: number): string => {
   }).format(amount)
 }
 
-const calculateDuration = (startTime: string): string => {
+const formatDuration = (startTime: string): string => {
   const start = new Date(startTime).getTime()
   const now = Date.now()
   const durationMs = now - start
@@ -116,89 +147,94 @@ const calculateDuration = (startTime: string): string => {
   return `${hours} jam ${minutes} menit`
 }
 
+const formatTimeAgo = (dateString: string): string => {
+  const date = new Date(dateString)
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMinutes = Math.floor(diffMs / (1000 * 60))
+  
+  if (diffMinutes < 1) return 'Baru saja'
+  if (diffMinutes < 60) return `${diffMinutes} menit lalu`
+  
+  const diffHours = Math.floor(diffMinutes / 60)
+  if (diffHours < 24) return `${diffHours} jam lalu`
+  
+  return date.toLocaleDateString('id-ID')
+}
+
 const calculateActualDuration = (startTime: string): number => {
   const start = new Date(startTime).getTime()
   const now = Date.now()
   const durationMs = now - start
-  const durationMinutes = Math.floor(durationMs / (1000 * 60))
-  
-  // DEBUG: Log time calculation details
-  console.log('⏱️ Duration Calculation:', {
-    startTime,
-    startTimeMs: start,
-    currentTime: new Date().toISOString(),
-    currentTimeMs: now,
-    durationMs,
-    durationMinutes,
-    crossesMidnight: new Date(startTime).getDate() !== new Date().getDate()
-  })
-  
-  return durationMinutes
+  return Math.floor(durationMs / (1000 * 60))
+}
+
+// ============================================
+// HYBRID HOURLY RATE RESOLVER
+// ============================================
+
+const resolveHourlyRate = (session: ActiveSession | undefined, units: Unit[]): number => {
+  if (!session) {
+    throw new Error('Session data is required')
+  }
+
+  if (session.hourlyRate && session.hourlyRate > 0) {
+    return session.hourlyRate
+  }
+
+  const unit = units.find(u => u.id === session.unitId)
+  if (unit && unit.hourlyRate && unit.hourlyRate > 0) {
+    return unit.hourlyRate
+  }
+
+  throw new Error(
+    `Unable to determine hourly rate for session ${session.id}. ` +
+    `Please ensure unit has valid pricing configuration.`
+  )
 }
 
 const calculateSessionCost = (
-  session: ActiveSession | undefined
-): { baseCost: number; overtimeCost: number; totalCost: number } => {
+  session: ActiveSession | undefined,
+  units: Unit[]
+): { baseCost: number; overtimeCost: number; totalCost: number; hourlyRate: number } => {
   if (!session) {
-    return { baseCost: 0, overtimeCost: 0, totalCost: 0 }
+    return { baseCost: 0, overtimeCost: 0, totalCost: 0, hourlyRate: 0 }
   }
   
-  // CRITICAL: hourlyRate must be provided from unit data - no fallback allowed
-  if (!session.hourlyRate || session.hourlyRate <= 0) {
-    console.error('❌ CRITICAL ERROR: Missing or invalid hourlyRate for session', {
-      sessionId: session.id,
-      unitName: session.unitName,
-      hourlyRate: session.hourlyRate
-    })
-    throw new Error('Hourly rate missing or invalid. Cannot calculate session cost.')
-  }
-  
-  const hourlyRate = session.hourlyRate
-  const actualMinutes = calculateActualDuration(session.startTime)
-  
-  // DEBUG: Log calculation details
-  console.log('🕐 Overtime Calculation Debug:', {
-    startTime: session.startTime,
-    currentTime: new Date().toISOString(),
-    actualMinutes,
-    purchasedDuration: session.purchasedDuration,
-    extendedDuration: session.extendedDuration,
-    billingModel: session.billingModel,
-    hourlyRate: hourlyRate  // Log the actual hourly rate being used
-  })
+  const hourlyRate = resolveHourlyRate(session, units)
   
   if (session.billingModel === 'timer') {
+    const actualMinutes = calculateActualDuration(session.startTime)
     const cost = Math.ceil((actualMinutes / 60) * hourlyRate)
-    return { baseCost: cost, overtimeCost: 0, totalCost: cost }
+    return { baseCost: cost, overtimeCost: 0, totalCost: cost, hourlyRate }
   }
   
   if (session.billingModel === 'hourly' || session.billingModel === 'package') {
     const baseCost = session.totalAmount || 0
-    const purchasedMinutes = (session.purchasedDuration || 0) + (session.extendedDuration || 0)
-    const overtimeMinutes = Math.max(0, actualMinutes - purchasedMinutes)
     
-    // DEBUG: Log overtime calculation
-    console.log('🚨 Overtime Details:', {
-      purchasedMinutes,
-      actualMinutes,
-      overtimeMinutes,
-      graceApplied: Math.max(0, overtimeMinutes - 5),
-      hourlyRate
-    })
-    
-    // 5 minute grace period
-    const chargeableOvertime = Math.max(0, overtimeMinutes - 5)
-    const overtimeCost = chargeableOvertime > 0 ? 
-      Math.ceil((chargeableOvertime / 60) * hourlyRate) : 0
+    if (session.isOvertime && session.remainingMinutes) {
+      const overtimeMinutes = session.remainingMinutes
+      const chargeableOvertime = Math.max(0, overtimeMinutes - 5)
+      const overtimeCost = chargeableOvertime > 0 ? 
+        Math.ceil((chargeableOvertime / 60) * hourlyRate) : 0
+        
+      return { 
+        baseCost: baseCost, 
+        overtimeCost: overtimeCost, 
+        totalCost: baseCost + overtimeCost,
+        hourlyRate
+      }
+    }
     
     return { 
       baseCost: baseCost, 
-      overtimeCost: overtimeCost, 
-      totalCost: baseCost + overtimeCost 
+      overtimeCost: 0, 
+      totalCost: baseCost,
+      hourlyRate
     }
   }
   
-  return { baseCost: 0, overtimeCost: 0, totalCost: 0 }
+  return { baseCost: 0, overtimeCost: 0, totalCost: 0, hourlyRate }
 }
 
 // ============================================
@@ -210,12 +246,9 @@ export function StopSessionDialog({
   onOpenChange, 
   session, 
   locationId,
+  units,
   onSuccess 
 }: StopSessionDialogProps) {
-  // ============================================
-  // ALL HOOKS MUST BE CALLED FIRST
-  // ============================================
-  
   const [loading, setLoading] = useState(false)
   const [fetchingFnb, setFetchingFnb] = useState(false)
   const [attachedFnbOrders, setAttachedFnbOrders] = useState<AttachedFnbOrder[]>([])
@@ -226,12 +259,30 @@ export function StopSessionDialog({
   })
 
   // ============================================
-  // ALL FUNCTIONS DEFINED BEFORE EFFECTS
+  // SAFE CALCULATIONS WITH ERROR HANDLING
+  // ============================================
+
+  let sessionCost = { baseCost: 0, overtimeCost: 0, totalCost: 0, hourlyRate: 0 }
+  let calculationError: string | null = null
+
+  try {
+    sessionCost = calculateSessionCost(session, units)
+  } catch (error) {
+    calculationError = error instanceof Error ? error.message : 'Failed to calculate session cost'
+  }
+
+  // ============================================
+  // FUNCTIONS
   // ============================================
 
   const handleSubmit = async (): Promise<void> => {
     if (!session) {
       toast.error('No session available')
+      return
+    }
+
+    if (calculationError) {
+      toast.error(calculationError)
       return
     }
 
@@ -243,10 +294,10 @@ export function StopSessionDialog({
     setLoading(true)
 
     try {
-      const requestBody = {
+      const requestBody: StopSessionRequest = {
         paymentMethod: formData.paymentMethod,
         fnbAmount: formData.fnbAmount > 0 ? formData.fnbAmount : undefined,
-        notes: formData.notes || undefined
+        notes: formData.notes.trim() || undefined
       }
 
       const response = await fetch(`/api/rentals/${session.id}/stop`, {
@@ -258,97 +309,130 @@ export function StopSessionDialog({
         body: JSON.stringify(requestBody)
       })
 
-      const result = await response.json()
+      const result: StopSessionResponse = await response.json()
 
       if (result.success) {
-        toast.success(`Session stopped for ${session.unitName}`)
+        toast.success('Session berhasil dihentikan!')
         onOpenChange(false)
         onSuccess?.()
       } else {
-        toast.error(result.error || 'Failed to stop session')
+        toast.error(result.error || 'Gagal menghentikan session')
       }
     } catch (error) {
       console.error('Error stopping session:', error)
-      toast.error('Failed to stop session')
+      toast.error('Gagal menghentikan session')
     } finally {
       setLoading(false)
     }
   }
 
-  // ============================================
-  // ALL EFFECTS MUST BE CALLED AFTER FUNCTIONS
-  // ============================================
+  const handleCancel = (): void => {
+    onOpenChange(false)
+  }
 
-  // ============================================
-  // ALL EFFECTS MUST BE CALLED AFTER FUNCTIONS
-  // ============================================
+  const fetchAttachedFnbOrders = async (): Promise<void> => {
+    if (!session) return
 
-  useEffect(() => {
-    if (!open || !session?.id) return
-
-    const fetchAttachedFnbOrders = async (): Promise<void> => {
-      setFetchingFnb(true)
-      try {
-        const response = await fetch(`/api/fnb/orders?sessionId=${session.id}`, {
-          headers: {
-            'X-Location-ID': locationId
-          }
-        })
-
-        if (response.ok) {
-          const result = await response.json()
-          if (result.success && result.data) {
-            console.log('🍕 Fetched F&B Orders for session:', result.data)
-            setAttachedFnbOrders(result.data)
-          }
-        }
-      } catch (error) {
-        console.error('Error fetching F&B orders:', error)
-      } finally {
-        setFetchingFnb(false)
+    setFetchingFnb(true)
+    try {
+      const response = await fetch(`/api/rentals/${session.id}/fnb-orders?locationId=${locationId}`)
+      const result: unknown = await response.json()
+      
+      if (isGetSessionFnbOrdersResponse(result) && result.success && result.data) {
+        const ordersWithTiming: AttachedFnbOrder[] = result.data.map((order: ApiFnbOrder) => ({
+          id: order.id,
+          totalAmount: order.totalAmount,
+          status: order.status,
+          paymentTiming: order.paymentTiming || (order.transactions && order.transactions.length > 0 ? 'immediate' : 'end_of_session'),
+          items: order.items,
+          createdAt: order.createdAt,
+          paidAt: order.paidAt
+        }))
+        
+        setAttachedFnbOrders(ordersWithTiming)
       }
+    } catch (error) {
+      console.error('Error fetching F&B orders:', error)
+    } finally {
+      setFetchingFnb(false)
     }
+  }
 
-    fetchAttachedFnbOrders()
-  }, [open, session?.id, locationId]) // Only these dependencies needed
+  const getPaymentMethodIcon = (method: string) => {
+    switch (method) {
+      case 'cash': return <Banknote className="w-4 h-4" />
+      case 'card': return <CreditCard className="w-4 h-4" />
+      case 'digital_wallet': return <Smartphone className="w-4 h-4" />
+      default: return <CreditCard className="w-4 h-4" />
+    }
+  }
+
+  const getBillingModelInfo = (billingModel: 'timer' | 'hourly' | 'package') => {
+    switch (billingModel) {
+      case 'timer':
+        return {
+          icon: <Timer className="w-4 h-4" />,
+          label: 'Timer Mode',
+          color: 'bg-blue-100 text-blue-800 border-blue-200',
+          description: 'Pembayaran sesuai durasi bermain'
+        }
+      case 'hourly':
+        return {
+          icon: <Clock className="w-4 h-4" />,
+          label: 'Hourly Rate',
+          color: 'bg-green-100 text-green-800 border-green-200',
+          description: 'Bayar dimuka per jam'
+        }
+      case 'package':
+        return {
+          icon: <Package className="w-4 h-4" />,
+          label: 'Package Deal',
+          color: 'bg-purple-100 text-purple-800 border-purple-200',
+          description: 'Paket dengan durasi tetap'
+        }
+      default:
+        return {
+          icon: <Receipt className="w-4 h-4" />,
+          label: 'Unknown',
+          color: 'bg-gray-100 text-gray-800 border-gray-200',
+          description: 'Model billing tidak diketahui'
+        }
+    }
+  }
+
+  // ============================================
+  // EFFECTS
+  // ============================================
 
   useEffect(() => {
-    if (!open) {
+    if (open && session) {
       setFormData({
         paymentMethod: 'cash',
         fnbAmount: 0,
         notes: ''
       })
       setAttachedFnbOrders([])
+      fetchAttachedFnbOrders()
     }
-  }, [open])
+  }, [open, session])
 
   // ============================================
-  // COMPUTED VALUES & CONDITIONAL LOGIC AFTER ALL HOOKS
+  // EARLY RETURNS
   // ============================================
 
-  // Now safe to do conditional returns after all hooks are called
-  if (!session) {
-    return null
-  }
+  if (!session) return null
 
-  // Filter F&B orders by payment timing
-  const unpaidFnbOrders = attachedFnbOrders.filter(order => 
-    order.paymentTiming === 'end_of_session' && order.status !== 'cancelled'
-  )
+  const immediateOrders = attachedFnbOrders.filter(order => order.paymentTiming === 'immediate')
+  const endOfSessionOrders = attachedFnbOrders.filter(order => order.paymentTiming === 'end_of_session')
   
-  const paidFnbOrders = attachedFnbOrders.filter(order => 
-    order.paymentTiming === 'immediate' && order.status !== 'cancelled'
-  )
+  const totalImmediateFnb = immediateOrders.reduce((sum, order) => sum + order.totalAmount, 0)
+  const totalEndOfSessionFnb = endOfSessionOrders.reduce((sum, order) => sum + order.totalAmount, 0)
+  
+  const finalTotal = sessionCost.totalCost + totalEndOfSessionFnb + formData.fnbAmount
+  const billingInfo = getBillingModelInfo(session.billingModel)
 
-  const sessionCost = calculateSessionCost(session)
-  
-  // CRITICAL FIX: Only include unpaid F&B orders in grand total
-  const unpaidFnbTotal = unpaidFnbOrders.reduce((total, order) => total + order.totalAmount, 0)
-  const paidFnbTotal = paidFnbOrders.reduce((total, order) => total + order.totalAmount, 0)
-  
-  // Grand total only includes session cost + unpaid F&B + manual F&B amount
-  const grandTotal = sessionCost.totalCost + unpaidFnbTotal + formData.fnbAmount
+  const sessionDuration = formatDuration(session.startTime)
+  const actualMinutes = calculateActualDuration(session.startTime)
 
   // ============================================
   // RENDER
@@ -356,265 +440,529 @@ export function StopSessionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center">
-            <StopCircle className="w-5 h-5 mr-2 text-red-600" />
-            Stop Session - {session.unitName}
-          </DialogTitle>
-          <DialogDescription>
-            Calculate final bill and process payment for this gaming session.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-6">
-          {/* Session Summary */}
-          <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
-            <h3 className="font-medium text-blue-900 mb-2 flex items-center">
-              <Clock className="w-4 h-4 mr-2" />
-              Session Summary
-            </h3>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <p className="text-blue-700">Duration: <span className="font-medium">{calculateDuration(session.startTime)}</span></p>
-                <p className="text-blue-700">Billing: <span className="font-medium capitalize">{session.billingModel}</span></p>
+      <DialogContent className="max-w-4xl h-[95vh] p-0">
+        {/* Fixed Header */}
+        <div className="flex-shrink-0 p-6 pb-4 border-b">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-red-100 rounded-lg">
+                <StopCircle className="w-6 h-6 text-red-600" />
               </div>
               <div>
-                <p className="text-blue-700">Base Cost: <span className="font-medium">{formatCurrency(sessionCost.baseCost)}</span></p>
-                {sessionCost.overtimeCost > 0 && (
-                  <p className="text-red-600">Overtime: <span className="font-medium">{formatCurrency(sessionCost.overtimeCost)}</span></p>
-                )}
+                <DialogTitle className="text-2xl font-bold">
+                  Hentikan Session
+                </DialogTitle>
+                <DialogDescription className="text-base">
+                  Selesaikan session dan proses pembayaran akhir
+                </DialogDescription>
               </div>
             </div>
-          </div>
-
-          {/* Already Paid F&B Orders (Information Only) */}
-          {paidFnbOrders.length > 0 && (
-            <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-              <h3 className="font-medium text-green-900 mb-3 flex items-center">
-                <CheckCircle2 className="w-4 h-4 mr-2" />
-                Already Paid F&B Orders ({paidFnbOrders.length})
-              </h3>
-              <div className="text-sm text-green-700 mb-2">
-                These orders were paid immediately and are not included in session bill.
-              </div>
-              <ScrollArea className="max-h-32">
-                <div className="space-y-2">
-                  {paidFnbOrders.map((order) => (
-                    <div key={order.id} className="flex items-center justify-between bg-white p-3 rounded border border-green-200 relative">
-                      <div className="flex items-center space-x-2 flex-1 min-w-0">
-                        <Badge variant="outline" className="text-xs bg-green-100 border-green-300 text-green-800 flex-shrink-0">
-                          Paid
-                        </Badge>
-                        <span className="text-sm text-green-700 truncate">
-                          {order.items.length} items • {order.items.map(item => `${item.quantity}x ${item.fnbItemName}`).join(', ')}
-                        </span>
-                      </div>
-                      <span className="text-sm font-medium text-green-700 flex-shrink-0 ml-2">
-                        {formatCurrency(order.totalAmount)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
-              <div className="mt-2 pt-2 border-t border-green-300">
-                <div className="flex justify-between text-sm font-medium text-green-800">
-                  <span>Total Already Paid:</span>
-                  <span>{formatCurrency(paidFnbTotal)}</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* F&B Orders - End of Session Payment Only */}
-          <div className="bg-gray-50 p-4 rounded-lg border">
-            <h3 className="font-medium text-gray-900 mb-3 flex items-center">
-              <Coffee className="w-4 h-4 mr-2" />
-              F&B Orders - End of Session Payment
-              {fetchingFnb && <div className="w-3 h-3 animate-spin rounded-full border border-gray-400 border-t-transparent ml-2" />}
-            </h3>
-
-            {unpaidFnbOrders.length === 0 ? (
-              <div className="text-center py-6 text-gray-500">
-                <Coffee className="w-8 h-8 mx-auto mb-2 text-gray-400" />
-                <p className="text-sm font-medium">No F&B orders to be paid at session end</p>
-                {paidFnbOrders.length > 0 && (
-                  <p className="text-xs text-gray-400 mt-1">
-                    All F&B orders for this session were paid immediately
-                  </p>
-                )}
-              </div>
-            ) : (
-              <ScrollArea className="max-h-48">
-                <div className="space-y-2">
-                  {unpaidFnbOrders.map((order) => (
-                    <div key={order.id} className="flex items-center justify-between bg-white p-3 rounded border border-yellow-200 relative">
-                      <div className="flex items-center space-x-2 flex-1 min-w-0">
-                        <Badge variant="outline" className="text-xs bg-yellow-100 border-yellow-300 text-yellow-800 flex-shrink-0">
-                          Pending
-                        </Badge>
-                        <span className="text-sm text-yellow-700 truncate">
-                          {order.items.length} items • {order.items.map(item => `${item.quantity}x ${item.fnbItemName}`).join(', ')}
-                        </span>
-                      </div>
-                      <span className="text-sm font-medium text-yellow-700 flex-shrink-0 ml-2">
-                        {formatCurrency(order.totalAmount)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
-            )}
-          </div>
-
-          {/* Cost Breakdown - FIXED CALCULATION */}
-          <div className="bg-gray-50 p-4 rounded-lg border">
-            <h3 className="font-medium text-gray-900 mb-3 flex items-center">
-              <Receipt className="w-4 h-4 mr-2" />
-              Session Bill - Cost Breakdown
-            </h3>
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span>Session Cost:</span>
-                <span className="font-medium">{formatCurrency(sessionCost.baseCost)}</span>
-              </div>
-              {sessionCost.overtimeCost > 0 && (
-                <div className="flex justify-between text-red-600">
-                  <span>Overtime Cost:</span>
-                  <span className="font-medium">{formatCurrency(sessionCost.overtimeCost)}</span>
-                </div>
-              )}
-              <div className="flex justify-between">
-                <span>F&B Orders (End of Session):</span>
-                <span className="font-medium">{formatCurrency(unpaidFnbTotal)}</span>
-              </div>
-              {formData.fnbAmount > 0 && (
-                <div className="flex justify-between">
-                  <span>Additional F&B:</span>
-                  <span className="font-medium">{formatCurrency(formData.fnbAmount)}</span>
-                </div>
-              )}
-              
-              <Separator />
-              
-              <div className="flex justify-between text-base font-bold">
-                <span>Grand Total:</span>
-                <span className="text-green-600">{formatCurrency(grandTotal)}</span>
-              </div>
-
-              {/* ADDITIONAL INFO: Show already paid F&B summary */}
-              {paidFnbTotal > 0 && (
-                <div className="mt-3 pt-3 border-t border-gray-300">
-                  <div className="flex justify-between text-xs text-gray-600">
-                    <span>Already Paid F&B (Not included above):</span>
-                    <span>{formatCurrency(paidFnbTotal)}</span>
-                  </div>
-                  <div className="flex justify-between text-xs font-medium text-gray-800 mt-1">
-                    <span>Session Total Revenue:</span>
-                    <span>{formatCurrency(grandTotal + paidFnbTotal)}</span>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Payment Form */}
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="paymentMethod">Payment Method</Label>
-              <Select 
-                value={formData.paymentMethod} 
-                onValueChange={(value: 'cash' | 'card' | 'digital_wallet') => 
-                  setFormData(prev => ({ ...prev, paymentMethod: value }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="cash">
-                    <div className="flex items-center">
-                      <Banknote className="w-4 h-4 mr-2" />
-                      Cash
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="card">
-                    <div className="flex items-center">
-                      <CreditCard className="w-4 h-4 mr-2" />
-                      Credit/Debit Card
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="digital_wallet">
-                    <div className="flex items-center">
-                      <Smartphone className="w-4 h-4 mr-2" />
-                      Digital Wallet
-                    </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="fnbAmount">Additional F&B Amount</Label>
-              <Input
-                id="fnbAmount"
-                type="number"
-                placeholder="0"
-                value={formData.fnbAmount || ''}
-                onChange={(e) => 
-                  setFormData(prev => ({ 
-                    ...prev, 
-                    fnbAmount: Math.max(0, parseInt(e.target.value) || 0)
-                  }))
-                }
-              />
-              <p className="text-xs text-gray-600">
-                Add any additional F&B purchases not recorded in the system
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="notes">Notes (Optional)</Label>
-              <Textarea
-                id="notes"
-                placeholder="Add any notes about this session..."
-                value={formData.notes}
-                onChange={(e) => 
-                  setFormData(prev => ({ ...prev, notes: e.target.value }))
-                }
-                rows={3}
-              />
+            <div className="text-right">
+              <div className="text-lg font-bold text-gray-900">{session.unitName}</div>
+              <Badge variant="outline" className={billingInfo.color}>
+                {billingInfo.icon}
+                <span className="ml-1">{billingInfo.label}</span>
+              </Badge>
             </div>
           </div>
         </div>
 
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={loading}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            onClick={handleSubmit}
-            disabled={loading}
-            className="bg-red-600 hover:bg-red-700"
-          >
-            {loading ? (
-              <>
-                <div className="w-4 h-4 animate-spin rounded-full border-2 border-white border-t-transparent mr-2" />
-                Processing...
-              </>
-            ) : (
-              <>
-                <StopCircle className="w-4 h-4 mr-2" />
-                Stop Session & Process Payment ({formatCurrency(grandTotal)})
-              </>
+        {/* Scrollable Content */}
+        <ScrollArea className="flex-1 overflow-y-auto p-6 pt-0">
+          <div className="space-y-6">
+            {/* Error Display */}
+            {calculationError && (
+              <Card className="border-red-200 bg-red-50">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <AlertTriangle className="w-5 h-5 text-red-600" />
+                    <div>
+                      <h4 className="font-semibold text-red-800">Calculation Error</h4>
+                      <p className="text-sm text-red-700">{calculationError}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             )}
-          </Button>
+
+            {/* Session Overview */}
+            <Card className="border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-blue-900">
+                  <PlayCircle className="w-5 h-5" />
+                  Session Overview
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-white/60 p-3 rounded-lg">
+                    <div className="flex items-center gap-2 text-blue-700 mb-1">
+                      <Clock className="w-4 h-4" />
+                      <span className="text-sm font-medium">Durasi</span>
+                    </div>
+                    <div className="font-bold text-blue-900">{sessionDuration}</div>
+                    <div className="text-xs text-blue-600">{actualMinutes} menit total</div>
+                  </div>
+                  
+                  <div className="bg-white/60 p-3 rounded-lg">
+                    <div className="flex items-center gap-2 text-blue-700 mb-1">
+                      <Calendar className="w-4 h-4" />
+                      <span className="text-sm font-medium">Mulai</span>
+                    </div>
+                    <div className="font-bold text-blue-900">
+                      {new Date(session.startTime).toLocaleTimeString('id-ID', { 
+                        hour: '2-digit', 
+                        minute: '2-digit' 
+                      })}
+                    </div>
+                    <div className="text-xs text-blue-600">
+                      {formatTimeAgo(session.startTime)}
+                    </div>
+                  </div>
+
+                  <div className="bg-white/60 p-3 rounded-lg">
+                    <div className="flex items-center gap-2 text-blue-700 mb-1">
+                      <DollarSign className="w-4 h-4" />
+                      <span className="text-sm font-medium">Rate</span>
+                    </div>
+                    <div className="font-bold text-blue-900">
+                      {formatCurrency(sessionCost.hourlyRate)}/jam
+                    </div>
+                    <div className="text-xs text-blue-600">{billingInfo.description}</div>
+                  </div>
+
+                  <div className="bg-white/60 p-3 rounded-lg">
+                    <div className="flex items-center gap-2 text-blue-700 mb-1">
+                      <User className="w-4 h-4" />
+                      <span className="text-sm font-medium">Customer</span>
+                    </div>
+                    <div className="font-bold text-blue-900">
+                      {session.customerName || units.find(u => u.id === session.unitId)?.customerDisplayName || 'Walk-in'}
+                    </div>
+                    <div className="text-xs text-blue-600">
+                      {session.isOvertime ? (
+                        <span className="text-red-600 font-medium">⚠ Overtime</span>
+                      ) : (
+                        <span className="text-green-600">✓ Normal</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Progress Bar for Session Time */}
+                {session.billingModel !== 'timer' && session.purchasedDuration && (
+                  <div className="bg-white/60 p-3 rounded-lg">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium text-blue-700">Progress Waktu</span>
+                      <span className="text-xs text-blue-600">
+                        {actualMinutes} / {(session.purchasedDuration || 0) + (session.extendedDuration || 0)} menit
+                      </span>
+                    </div>
+                    <Progress 
+                      value={Math.min(100, (actualMinutes / ((session.purchasedDuration || 0) + (session.extendedDuration || 0))) * 100)}
+                      className="h-2"
+                    />
+                    {session.isOvertime && (
+                      <div className="flex items-center gap-1 mt-2 text-red-600">
+                        <Zap className="w-3 h-3" />
+                        <span className="text-xs font-medium">
+                          Overtime: +{session.remainingMinutes} menit
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Cost Breakdown */}
+            {!calculationError && (
+              <Card className="border-green-200 bg-gradient-to-r from-green-50 to-emerald-50">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-green-900">
+                    <Calculator className="w-5 h-5" />
+                    Perhitungan Biaya
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="bg-white/60 p-4 rounded-lg space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-green-700 font-medium">Biaya Dasar Session:</span>
+                      <span className="text-green-900 font-bold">{formatCurrency(sessionCost.baseCost)}</span>
+                    </div>
+                    
+                    {sessionCost.overtimeCost > 0 && (
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                          <span className="text-red-700 font-medium">Biaya Overtime:</span>
+                          <Badge variant="outline" className="text-xs bg-red-100 text-red-700 border-red-200">
+                            {session.remainingMinutes}min - 5min grace
+                          </Badge>
+                        </div>
+                        <span className="text-red-900 font-bold">{formatCurrency(sessionCost.overtimeCost)}</span>
+                      </div>
+                    )}
+                    
+                    <Separator />
+                    
+                    <div className="flex justify-between items-center text-lg">
+                      <span className="text-green-800 font-bold">Total Session:</span>
+                      <span className="text-green-900 font-bold">{formatCurrency(sessionCost.totalCost)}</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* F&B Orders */}
+            {fetchingFnb ? (
+              <Card className="border-gray-200">
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-center gap-3 text-gray-600">
+                    <Coffee className="w-5 h-5 animate-spin" />
+                    <span>Memuat pesanan F&B...</span>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : attachedFnbOrders.length > 0 ? (
+              <div className="space-y-4">
+                {/* Already Paid F&B Orders */}
+                {immediateOrders.length > 0 && (
+                  <Card className="border-green-200 bg-green-50">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="flex items-center gap-2 text-green-900">
+                        <CheckCircle2 className="w-5 h-5" />
+                        F&B Sudah Dibayar ({immediateOrders.length})
+                      </CardTitle>
+                      <p className="text-sm text-green-700">
+                        Pesanan ini sudah dibayar langsung dan tidak termasuk dalam tagihan session.
+                      </p>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {immediateOrders.map((order) => (
+                        <div key={order.id} className="bg-white p-3 rounded-lg border border-green-200">
+                          <div className="flex justify-between items-start">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                <ShoppingCart className="w-4 h-4 text-green-600" />
+                                <span className="font-semibold text-green-800">
+                                  Order #{order.id.slice(-6)}
+                                </span>
+                                <Badge className="bg-green-100 text-green-700 text-xs">
+                                  ✓ Lunas
+                                </Badge>
+                              </div>
+                              <div className="text-sm text-green-700 mb-2">
+                                {order.items.map(item => 
+                                  `${item.quantity}× ${item.fnbItemName}`
+                                ).join(', ')}
+                              </div>
+                              {order.paidAt && (
+                                <div className="text-xs text-green-600">
+                                  Dibayar: {new Date(order.paidAt).toLocaleString('id-ID')}
+                                </div>
+                              )}
+                            </div>
+                            <div className="text-right">
+                              <div className="font-bold text-green-900">
+                                {formatCurrency(order.totalAmount)}
+                              </div>
+                              <div className="text-xs text-green-600">
+                                {order.items.length} item
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      <div className="bg-green-100 p-3 rounded-lg">
+                        <div className="flex justify-between items-center">
+                          <span className="font-semibold text-green-800">Total Sudah Dibayar:</span>
+                          <span className="font-bold text-green-900">{formatCurrency(totalImmediateFnb)}</span>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Unpaid F&B Orders */}
+                {endOfSessionOrders.length > 0 && (
+                  <Card className="border-orange-200 bg-orange-50">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="flex items-center gap-2 text-orange-900">
+                        <Coffee className="w-5 h-5" />
+                        F&B Belum Dibayar ({endOfSessionOrders.length})
+                      </CardTitle>
+                      <p className="text-sm text-orange-700">
+                        Pesanan ini akan ditagih bersama dengan biaya session.
+                      </p>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {endOfSessionOrders.map((order) => (
+                        <div key={order.id} className="bg-white p-3 rounded-lg border border-orange-200">
+                          <div className="flex justify-between items-start">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                <ShoppingCart className="w-4 h-4 text-orange-600" />
+                                <span className="font-semibold text-orange-800">
+                                  Order #{order.id.slice(-6)}
+                                </span>
+                                <Badge className="bg-orange-100 text-orange-700 text-xs">
+                                  ⏳ Pending
+                                </Badge>
+                              </div>
+                              <div className="text-sm text-orange-700 mb-2">
+                                {order.items.map(item => 
+                                  `${item.quantity}× ${item.fnbItemName}`
+                                ).join(', ')}
+                              </div>
+                              <div className="text-xs text-orange-600">
+                                Dipesan: {formatTimeAgo(order.createdAt)}
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="font-bold text-orange-900">
+                                {formatCurrency(order.totalAmount)}
+                              </div>
+                              <div className="text-xs text-orange-600">
+                                {order.items.length} item
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      <div className="bg-orange-100 p-3 rounded-lg">
+                        <div className="flex justify-between items-center">
+                          <span className="font-semibold text-orange-800">Total Belum Dibayar:</span>
+                          <span className="font-bold text-orange-900">{formatCurrency(totalEndOfSessionFnb)}</span>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            ) : null}
+
+            {/* Payment Form */}
+            <Card className="border-gray-200">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-gray-900">
+                  <Receipt className="w-5 h-5" />
+                  Informasi Pembayaran
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">Metode Pembayaran</Label>
+                    <Select 
+                      value={formData.paymentMethod} 
+                      onValueChange={(value: 'cash' | 'card' | 'digital_wallet') => 
+                        setFormData(prev => ({ ...prev, paymentMethod: value }))
+                      }
+                    >
+                      <SelectTrigger className="h-11">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="cash">
+                          <div className="flex items-center gap-3">
+                            <Banknote className="w-4 h-4 text-green-600" />
+                            <div>
+                              <div className="font-medium">Tunai</div>
+                              <div className="text-xs text-gray-500">Pembayaran cash</div>
+                            </div>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="card">
+                          <div className="flex items-center gap-3">
+                            <CreditCard className="w-4 h-4 text-blue-600" />
+                            <div>
+                              <div className="font-medium">Kartu</div>
+                              <div className="text-xs text-gray-500">Debit/Credit card</div>
+                            </div>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="digital_wallet">
+                          <div className="flex items-center gap-3">
+                            <Smartphone className="w-4 h-4 text-purple-600" />
+                            <div>
+                              <div className="font-medium">Digital Wallet</div>
+                              <div className="text-xs text-gray-500">OVO, GoPay, Dana</div>
+                            </div>
+                          </div>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">F&B Tambahan (Opsional)</Label>
+                    <div className="relative">
+                      <Input
+                        type="number"
+                        min="0"
+                        step="1000"
+                        value={formData.fnbAmount}
+                        onChange={(e) => setFormData(prev => ({ 
+                          ...prev, 
+                          fnbAmount: Math.max(0, parseInt(e.target.value) || 0)
+                        }))}
+                        placeholder="0"
+                        className="h-11 pl-12"
+                      />
+                      <DollarSign className="w-4 h-4 text-gray-400 absolute left-4 top-1/2 transform -translate-y-1/2" />
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      Tambahan pembelian F&B yang tidak tercatat
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">Catatan (Opsional)</Label>
+                  <Textarea
+                    value={formData.notes}
+                    onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
+                    placeholder="Tambahkan catatan untuk session ini..."
+                    rows={3}
+                    className="resize-none"
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Final Bill Summary */}
+            {!calculationError && (
+              <Card className="border-2 border-indigo-200 bg-gradient-to-r from-indigo-50 to-purple-50">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-indigo-900">
+                    <TrendingUp className="w-5 h-5" />
+                    Ringkasan Tagihan Final
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* Detailed Breakdown */}
+                  <div className="bg-white/70 p-4 rounded-lg space-y-3">
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <PlayCircle className="w-4 h-4 text-indigo-600" />
+                        <span className="text-indigo-700 font-medium">Biaya Session:</span>
+                      </div>
+                      <span className="text-indigo-900 font-bold">{formatCurrency(sessionCost.totalCost)}</span>
+                    </div>
+                    
+                    {totalEndOfSessionFnb > 0 && (
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                          <Coffee className="w-4 h-4 text-orange-600" />
+                          <span className="text-indigo-700 font-medium">F&B (Belum Dibayar):</span>
+                        </div>
+                        <span className="text-indigo-900 font-bold">{formatCurrency(totalEndOfSessionFnb)}</span>
+                      </div>
+                    )}
+                    
+                    {formData.fnbAmount > 0 && (
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                          <ShoppingCart className="w-4 h-4 text-green-600" />
+                          <span className="text-indigo-700 font-medium">F&B Tambahan:</span>
+                        </div>
+                        <span className="text-indigo-900 font-bold">{formatCurrency(formData.fnbAmount)}</span>
+                      </div>
+                    )}
+                    
+                    {totalImmediateFnb > 0 && (
+                      <div className="flex justify-between items-center text-sm opacity-70">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="w-3 h-3 text-green-500" />
+                          <span className="text-green-600">F&B Sudah Dibayar:</span>
+                        </div>
+                        <span className="text-green-600 line-through">{formatCurrency(totalImmediateFnb)}</span>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Grand Total */}
+                  <div className="bg-indigo-100 p-4 rounded-lg border-2 border-indigo-200">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-indigo-200 rounded-lg">
+                          <Receipt className="w-5 h-5 text-indigo-700" />
+                        </div>
+                        <div>
+                          <div className="text-2xl font-bold text-indigo-900">
+                            {formatCurrency(finalTotal)}
+                          </div>
+                          <div className="flex items-center gap-2 text-sm text-indigo-700">
+                            {getPaymentMethodIcon(formData.paymentMethod)}
+                            <span className="capitalize font-medium">
+                              {formData.paymentMethod.replace('_', ' ')}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-sm text-indigo-700 font-medium">
+                          Total Items: {
+                            endOfSessionOrders.reduce((sum, order) => sum + order.items.length, 0) + 
+                            (formData.fnbAmount > 0 ? 1 : 0) + 1
+                          }
+                        </div>
+                        <div className="text-xs text-indigo-600">
+                          Session + F&B Combined
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Payment Summary */}
+                  <div className="bg-white/70 p-3 rounded-lg">
+                    <div className="flex items-center gap-2 text-sm text-indigo-700">
+                      <Info className="w-4 h-4" />
+                      <span>
+                        {totalImmediateFnb > 0 && (
+                          <>F&B senilai {formatCurrency(totalImmediateFnb)} sudah dibayar sebelumnya. </>
+                        )}
+                        Customer perlu membayar {formatCurrency(finalTotal)} untuk session ini.
+                      </span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </ScrollArea>
+
+        {/* Footer */}
+        <DialogFooter className="flex-shrink-0 border-t pt-4">
+          <div className="flex flex-col sm:flex-row gap-3 w-full">
+            <Button 
+              variant="outline" 
+              onClick={handleCancel} 
+              disabled={loading}
+              className="flex-1 sm:flex-none h-11"
+            >
+              <Clock className="w-4 h-4 mr-2" />
+              Batal
+            </Button>
+            <Button 
+              onClick={handleSubmit} 
+              disabled={loading || !!calculationError}
+              className="flex-1 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white h-11"
+            >
+              {loading ? (
+                <>
+                  <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Memproses...
+                </>
+              ) : (
+                <>
+                  <StopCircle className="w-4 h-4 mr-2" />
+                  Hentikan Session - {formatCurrency(finalTotal)}
+                </>
+              )}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
