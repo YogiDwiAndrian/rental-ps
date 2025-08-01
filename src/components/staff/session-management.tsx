@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+import { FnbOrderDetailDialog } from './fnb-order-detail-dialog'
 
 // Import dialogs
 import { StartSessionDialog } from './start-session-dialog'
@@ -77,7 +78,10 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
   const [stopDialogOpen, setStopDialogOpen] = useState(false)
   const [extendDialogOpen, setExtendDialogOpen] = useState(false)
   const [fnbOrderDialogOpen, setFnbOrderDialogOpen] = useState(false)
-  const [selectedSessionForFnb, setSelectedSessionForFnb] = useState<string | undefined>(undefined)
+  const [selectedSessionForFnb, setSelectedSessionForFnb] = useState<{
+  sessionId: string
+  unitName: string
+} | undefined>(undefined)
   const [activeTab, setActiveTab] = useState('active-sessions')
 
   // ===== DERIVED STATE =====
@@ -209,9 +213,17 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
   }
 
   const handleViewFnbOrders = (sessionId: string): void => {
-    setSelectedSessionForFnb(sessionId)
-    setFnbOrderDialogOpen(true)
-  }
+  const activeSession = activeSessions.find(s => s.id === sessionId)
+  const unitName = activeSession?.unitName || 
+    realTimeUnits.find(u => u.id === activeSession?.unitId)?.name || 
+    'Unknown Unit'
+  
+  setSelectedSessionForFnb({
+    sessionId,
+    unitName
+  })
+  setFnbOrderDialogOpen(true)
+}
 
   const handleDialogSuccess = (): void => {
     fetchActiveSessions()
@@ -337,25 +349,21 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
 
             {isOccupied && activeSession && (
               <div className="flex gap-2">
-                {/* Show Extend button only for non-timer billing */}
-                {activeSession.billingModel !== 'timer' && (
-                  <Button 
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleExtendSession(activeSession)}
-                    className="flex-1"
-                  >
-                    <Clock className="w-4 h-4 mr-1" />
-                    Extend
-                  </Button>
-                )}
-                
-                {/* Stop button - full width for timer, half width for others */}
+                <Button 
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleExtendSession(activeSession)}
+                  className="flex-1"
+                  disabled={activeSession.billingModel === 'timer'}
+                >
+                  <Clock className="w-4 h-4 mr-1" />
+                  {activeSession.billingModel === 'timer' ? 'N/A' : 'Extend'}
+                </Button>
                 <Button 
                   variant="destructive"
                   size="sm"
                   onClick={() => handleStopSession(activeSession)}
-                  className={activeSession.billingModel === 'timer' ? 'w-full' : 'flex-1'}
+                  className="flex-1"
                   disabled={
                     activeSession.billingModel === 'timer' && 
                     calculateRunningDuration(activeSession.startTime) < 1
@@ -570,30 +578,18 @@ export function SessionManagement({ units, locationId, onRefresh }: SessionManag
       />
 
       {/* F&B Orders Dialog - placeholder for future implementation */}
-      {fnbOrderDialogOpen && selectedSessionForFnb && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-lg max-w-md w-full mx-4">
-            <h3 className="text-lg font-semibold mb-4">F&B Orders</h3>
-            <p className="text-gray-600 mb-4">
-              F&B orders for session: {selectedSessionForFnb}
-            </p>
-            <p className="text-sm text-gray-500 mb-4">
-              This will show detailed F&B orders related to this session.
-            </p>
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setFnbOrderDialogOpen(false)
-                  setSelectedSessionForFnb(undefined)
-                }}
-              >
-                Close
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <FnbOrderDetailDialog
+  open={fnbOrderDialogOpen}
+  onOpenChange={(open) => {
+    setFnbOrderDialogOpen(open)
+    if (!open) {
+      setSelectedSessionForFnb(undefined)
+    }
+  }}
+  sessionId={selectedSessionForFnb?.sessionId || ''}
+  sessionUnitName={selectedSessionForFnb?.unitName || ''}
+  locationId={locationId}
+/>
     </>
   )
 }

@@ -83,9 +83,9 @@ export function SessionHistory({ locationId, onRefresh, onViewFnbOrders }: Sessi
   const [totalPages, setTotalPages] = useState(1)
   const [totalSessions, setTotalSessions] = useState(0)
   const [statusFilter, setStatusFilter] = useState<string>('all')
-  const [dateFilter, setDateFilter] = useState<string>('all')
-  const [dateFrom, setDateFrom] = useState<string>('')
-  const [dateTo, setDateTo] = useState<string>('')
+  const [dateFilter, setDateFilter] = useState<string>('today')
+const [dateFrom, setDateFrom] = useState<string>('')
+const [dateTo, setDateTo] = useState<string>('')
 
   const ITEMS_PER_PAGE = 15
 
@@ -138,6 +138,13 @@ export function SessionHistory({ locationId, onRefresh, onViewFnbOrders }: Sessi
     const today = new Date()
     return new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0]
   }
+
+  useEffect(() => {
+  // Set default dates untuk today filter saat component mount
+  const today = getTodayDateString()
+  setDateFrom(today)
+  setDateTo(today)
+}, [])
 
   const getStatusColor = (status: RentalSession['status']) => {
     const statusColors = {

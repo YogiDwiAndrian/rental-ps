@@ -189,7 +189,8 @@ export function FnbOrderStatusDialog({
   const isStatusChangePossible = availableStatuses.length > 0 && !orderTooOld
   const isCancellation = formData.newStatus === 'cancelled'
   const isPaid = order.status === 'completed'
-
+const reasonRequired = isCancellation && !formData.reason.trim()
+const buttonDisabled = loading || formData.newStatus === order.status || orderTooOld || reasonRequired
   // ============================================
   // HANDLERS
   // ============================================
@@ -463,10 +464,10 @@ export function FnbOrderStatusDialog({
           </Button>
           {isStatusChangePossible && (
             <Button 
-              onClick={handleStatusUpdate}
-              disabled={loading || formData.newStatus === order.status || orderTooOld}
-              variant={isCancellation ? "destructive" : "default"}
-            >
+  onClick={handleStatusUpdate}
+  disabled={buttonDisabled}
+  variant={isCancellation ? "destructive" : "default"}
+>
               {loading ? (
                 <div className="flex items-center">
                   <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
@@ -475,7 +476,10 @@ export function FnbOrderStatusDialog({
               ) : (
                 <>
                   {isCancellation ? <XCircle className="w-4 h-4 mr-2" /> : <DollarSign className="w-4 h-4 mr-2" />}
-                  Ubah Status
+Ubah Status
+{isCancellation && reasonRequired && (
+  <span className="ml-1 text-xs opacity-75">(Isi alasan)</span>
+)}
                 </>
               )}
             </Button>
