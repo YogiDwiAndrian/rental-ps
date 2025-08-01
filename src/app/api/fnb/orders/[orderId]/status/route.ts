@@ -1,3 +1,4 @@
+// src/app/api/fnb/orders/[orderId]/status/route.ts - FIXED with date restriction validation
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
@@ -5,17 +6,23 @@ import { prisma } from '@/lib/prisma'
 import { z } from 'zod'
 
 // ============================================
-// TYPES & VALIDATION (SIMPLIFIED)
+// VALIDATION SCHEMAS
 // ============================================
 
 const updateStatusSchema = z.object({
   status: z.enum(['pending', 'completed', 'cancelled']),
   reason: z.string().optional(),
-  restore_stock: z.boolean().default(false),
+  restore_stock: z.boolean().optional().default(false),
   notes: z.string().optional()
 })
 
-type UpdateStatusRequest = z.infer<typeof updateStatusSchema>
+// ============================================
+// TYPES
+// ============================================
+
+interface RouteParams {
+  orderId: string
+}
 
 interface UpdateStatusResponse {
   orderId: string
@@ -30,41 +37,51 @@ interface UpdateStatusResponse {
 }
 
 // ============================================
-// VALIDATION FUNCTIONS (SIMPLIFIED)
+// UTILITY FUNCTIONS
 // ============================================
 
-const isValidStatusTransition = (
-  currentStatus: string, 
-  newStatus: string
-): boolean => {
-  const validTransitions: Record<string, string[]> = {
-    pending: ['completed', 'cancelled'],
-    completed: ['cancelled'], // For refund scenarios
-    cancelled: [] // No transitions from cancelled
-  }
+const isOrderTooOldToModify = (createdAt: Date): boolean => {
+  const now = new Date()
+  const diffInHours = (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60)
+  
+  // Return true if order is more than 24 hours old
+  return diffInHours > 24
+}
 
-  return validTransitions[currentStatus]?.includes(newStatus) || false
+const getOrderAge = (createdAt: Date): string => {
+  const now = new Date()
+  const diffInHours = (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60)
+  
+  if (diffInHours < 1) {
+    const diffInMinutes = Math.floor(diffInHours * 60)
+    return `${diffInMinutes} minutes ago`
+  } else if (diffInHours < 24) {
+    return `${Math.floor(diffInHours)} hours ago`
+  } else {
+    const diffInDays = Math.floor(diffInHours / 24)
+    return `${diffInDays} day${diffInDays > 1 ? 's' : ''} ago`
+  }
 }
 
 // ============================================
-// PATCH: UPDATE ORDER STATUS
+// MAIN HANDLER
 // ============================================
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { orderId: string } }
-) {
+  context: { params: Promise<RouteParams> }
+): Promise<NextResponse<{ success: boolean; data?: UpdateStatusResponse; error?: string; details?: { field: string; message: string }[] | string; message?: string }>> {
   try {
-    // ===== AUTHENTICATION & AUTHORIZATION =====
+    // ===== AUTHENTICATION =====
     const session = await getServerSession(authOptions)
     if (!session?.user) {
       return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
+        { success: false, error: 'Authentication required' },
         { status: 401 }
       )
     }
 
-    // Check if user is staff or owner
+    // Check permissions
     if (session.user.role !== 'staff' && session.user.role !== 'owner') {
       return NextResponse.json(
         { success: false, error: 'Insufficient permissions' },
@@ -76,22 +93,38 @@ export async function PATCH(
     const locationId = request.headers.get('X-Location-ID')
     if (!locationId) {
       return NextResponse.json(
-        { success: false, error: 'Location ID is required' },
+        { success: false, error: 'Location ID required in headers' },
         { status: 400 }
       )
     }
 
-    // ===== VALIDATE REQUEST BODY =====
+    // ===== VERIFY LOCATION ACCESS =====
+    if (session.user.role === 'staff') {
+      const hasAccess = await prisma.locationAssignment.findFirst({
+        where: {
+          userId: session.user.id,
+          locationId: locationId,
+          isActive: true
+        }
+      })
+
+      if (!hasAccess) {
+        return NextResponse.json(
+          { success: false, error: 'Access denied to this location' },
+          { status: 403 }
+        )
+      }
+    }
+
+    // ===== PARSE PARAMS & BODY =====
+    const { orderId } = await context.params
     const body = await request.json()
     const validatedData = updateStatusSchema.parse(body)
 
-    const { orderId } = params
-
-    // ===== FIND ORDER =====
+    // ===== GET EXISTING ORDER =====
     const existingOrder = await prisma.fnbOrder.findFirst({
       where: {
         id: orderId,
-        // Ensure order belongs to the location
         fnbOrderItems: {
           some: {
             fnbItem: {
@@ -111,32 +144,53 @@ export async function PATCH(
               }
             }
           }
-        },
-        rentalSession: {
-          include: {
-            unit: {
-              select: {
-                customerDisplayName: true
-              }
-            }
-          }
         }
       }
     })
 
     if (!existingOrder) {
       return NextResponse.json(
-        { success: false, error: 'Order not found' },
+        { success: false, error: 'F&B Order not found' },
         { status: 404 }
       )
     }
 
-    // ===== VALIDATE STATUS TRANSITION =====
-    if (!isValidStatusTransition(existingOrder.status, validatedData.status)) {
+    // ===== CRITICAL: DATE RESTRICTION VALIDATION =====
+    const orderTooOld = isOrderTooOldToModify(existingOrder.createdAt)
+    const orderAge = getOrderAge(existingOrder.createdAt)
+
+    if (orderTooOld) {
       return NextResponse.json(
         { 
           success: false, 
-          error: `Invalid status transition from ${existingOrder.status} to ${validatedData.status}` 
+          error: `Order modification not allowed. Orders cannot be modified after 24 hours from creation. This order was created ${orderAge}.`,
+          details: 'ORDER_TOO_OLD_TO_MODIFY'
+        },
+        { status: 400 }
+      )
+    }
+
+    // ===== VALIDATE STATUS TRANSITION =====
+    if (existingOrder.status === validatedData.status) {
+      return NextResponse.json(
+        { success: false, error: 'Order already has this status' },
+        { status: 400 }
+      )
+    }
+
+    // Validate allowed status transitions
+    const allowedTransitions: Record<string, string[]> = {
+      'pending': ['completed', 'cancelled'],
+      'completed': ['cancelled'], // For refund scenarios
+      'cancelled': [] // No transitions from cancelled
+    }
+
+    const validTransitions = allowedTransitions[existingOrder.status] || []
+    if (!validTransitions.includes(validatedData.status)) {
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: `Cannot change status from ${existingOrder.status} to ${validatedData.status}` 
         },
         { status: 400 }
       )
@@ -152,13 +206,28 @@ export async function PATCH(
 
     // ===== UPDATE ORDER IN TRANSACTION =====
     const result = await prisma.$transaction(async (tx) => {
-      // Update order status
+      // Update order status with cancellation info if applicable
+      const updateData: {
+        status: string
+        updatedAt: Date
+        cancellationReason?: string
+        cancelledAt?: Date
+        cancelledBy?: string
+      } = {
+        status: validatedData.status,
+        updatedAt: new Date()
+      }
+
+      // Add cancellation fields if status is being set to cancelled
+      if (validatedData.status === 'cancelled') {
+        updateData.cancellationReason = validatedData.reason
+        updateData.cancelledAt = new Date()
+        updateData.cancelledBy = session.user.id
+      }
+
       const updatedOrder = await tx.fnbOrder.update({
         where: { id: orderId },
-        data: {
-          status: validatedData.status,
-          updatedAt: new Date()
-        }
+        data: updateData
       })
 
       // Restore stock if cancelling and restore_stock is true
@@ -195,7 +264,7 @@ export async function PATCH(
       // Use appropriate event type based on new status
       const eventType = validatedData.status === 'cancelled' 
         ? 'FNB_ORDER_CANCELLED' 
-        : 'FNB_ORDER_CREATED' // Temporary until FNB_ORDER_UPDATED is added
+        : 'FNB_ORDER_UPDATED'
 
       await tx.auditLog.create({
         data: {
@@ -216,9 +285,11 @@ export async function PATCH(
             restoreStock: validatedData.restore_stock,
             notes: validatedData.notes,
             restoredItems: restoredItems.length > 0 ? restoredItems : undefined,
+            orderAge: orderAge,
             statusChangeDescription: validatedData.status === 'cancelled' 
               ? `Order cancelled: ${validatedData.reason}`
-              : `Status changed from ${existingOrder.status} to ${validatedData.status}`
+              : `Status changed from ${existingOrder.status} to ${validatedData.status}`,
+            updatedBy: session.user.name || session.user.email // ADD: Track who made the change
           }
         }
       })
@@ -238,6 +309,15 @@ export async function PATCH(
       restoredItems: result.restoredItems.length > 0 ? result.restoredItems : undefined
     }
 
+    console.log(`✅ F&B Order status updated:`, {
+      orderId,
+      previousStatus: existingOrder.status,
+      newStatus: validatedData.status,
+      updatedBy: session.user.name || session.user.email,
+      orderAge,
+      restoredItemsCount: result.restoredItems.length
+    })
+
     return NextResponse.json({
       success: true,
       data: responseData,
@@ -245,14 +325,17 @@ export async function PATCH(
     })
 
   } catch (error) {
-    console.error('Update F&B Order Status API Error:', error)
+    console.error('❌ Update F&B Order Status API Error:', error)
 
     if (error instanceof z.ZodError) {
       return NextResponse.json(
         {
           success: false,
           error: 'Validation error',
-          details: error.issues
+          details: error.issues.map(issue => ({
+            field: issue.path.join('.'),
+            message: issue.message
+          }))
         },
         { status: 400 }
       )

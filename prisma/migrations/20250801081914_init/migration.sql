@@ -254,10 +254,15 @@ CREATE TABLE "fnb_items" (
 CREATE TABLE "fnb_orders" (
     "id" TEXT NOT NULL,
     "rental_session_id" TEXT,
+    "created_by" TEXT,
+    "cancellation_reason" TEXT,
+    "cancelled_at" TIMESTAMP(3),
+    "cancelled_by" TEXT,
     "total_amount" DECIMAL(10,2) NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'completed',
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
+    "userId" TEXT,
 
     CONSTRAINT "fnb_orders_pkey" PRIMARY KEY ("id")
 );
@@ -409,6 +414,21 @@ CREATE UNIQUE INDEX "tenants_subdomain_key" ON "tenants"("subdomain");
 CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
 
 -- CreateIndex
+CREATE INDEX "users_tenant_id_idx" ON "users"("tenant_id");
+
+-- CreateIndex
+CREATE INDEX "users_email_idx" ON "users"("email");
+
+-- CreateIndex
+CREATE INDEX "users_role_idx" ON "users"("role");
+
+-- CreateIndex
+CREATE INDEX "users_is_active_idx" ON "users"("is_active");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "users_tenant_id_email_key" ON "users"("tenant_id", "email");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "locations_tenant_id_code_key" ON "locations"("tenant_id", "code");
 
 -- CreateIndex
@@ -434,6 +454,15 @@ CREATE UNIQUE INDEX "fnb_categories_location_id_name_key" ON "fnb_categories"("l
 
 -- CreateIndex
 CREATE UNIQUE INDEX "fnb_items_location_id_category_id_name_key" ON "fnb_items"("location_id", "category_id", "name");
+
+-- CreateIndex
+CREATE INDEX "fnb_orders_created_by_idx" ON "fnb_orders"("created_by");
+
+-- CreateIndex
+CREATE INDEX "fnb_orders_cancelled_by_idx" ON "fnb_orders"("cancelled_by");
+
+-- CreateIndex
+CREATE INDEX "fnb_orders_cancelled_at_idx" ON "fnb_orders"("cancelled_at");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "customer_page_configs_tenant_id_location_id_key" ON "customer_page_configs"("tenant_id", "location_id");
@@ -521,6 +550,15 @@ ALTER TABLE "fnb_items" ADD CONSTRAINT "fnb_items_category_id_fkey" FOREIGN KEY 
 
 -- AddForeignKey
 ALTER TABLE "fnb_orders" ADD CONSTRAINT "fnb_orders_rental_session_id_fkey" FOREIGN KEY ("rental_session_id") REFERENCES "rental_sessions"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "fnb_orders" ADD CONSTRAINT "fnb_orders_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "fnb_orders" ADD CONSTRAINT "fnb_orders_cancelled_by_fkey" FOREIGN KEY ("cancelled_by") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "fnb_orders" ADD CONSTRAINT "fnb_orders_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "fnb_order_items" ADD CONSTRAINT "fnb_order_items_fnb_order_id_fkey" FOREIGN KEY ("fnb_order_id") REFERENCES "fnb_orders"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

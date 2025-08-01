@@ -1,4 +1,4 @@
-// src/app/api/fnb/orders/route.ts - Updated to include unitName
+// src/app/api/fnb/orders/route.ts - FIXED to work with correct schema
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
@@ -27,18 +27,17 @@ const createFnbOrderSchema = z.object({
     fnb_item_id: z.string().min(1),
     quantity: z.number().min(1).max(100)
   }))).min(1).transform((items) => {
-    // Normalize field names from both camelCase and snake_case
     return items.map(item => ({
       fnbItemId: 'fnbItemId' in item ? item.fnbItemId : item.fnb_item_id,
       quantity: item.quantity
     }))
   }),
   rentalSessionId: z.string().optional().or(z.literal('')),
-  rental_session_id: z.string().optional(), // Support snake_case too
+  rental_session_id: z.string().optional(),
   paymentTiming: z.enum(['immediate', 'end_of_session']).default('immediate'),
-  payment_timing: z.enum(['immediate', 'end_of_session']).optional(), // Support snake_case too
+  payment_timing: z.enum(['immediate', 'end_of_session']).optional(),
   paymentMethod: z.enum(['cash', 'card', 'digital_wallet']).default('cash').optional(),
-  payment_method: z.enum(['cash', 'card', 'digital_wallet']).optional(), // Support snake_case too
+  payment_method: z.enum(['cash', 'card', 'digital_wallet']).optional(),
   notes: z.string().optional()
 }).transform((data) => ({
   items: data.items,
@@ -49,7 +48,7 @@ const createFnbOrderSchema = z.object({
 }))
 
 // ============================================
-// TYPES - Updated with unitName
+// TYPES - Updated with cancellation info
 // ============================================
 
 interface FnbOrderItem {
@@ -68,10 +67,15 @@ interface FnbOrder {
   status: 'pending' | 'completed' | 'cancelled'
   paymentTiming: 'immediate' | 'end_of_session'
   rentalSessionId?: string
-  unitName?: string  // NEW: Add unit name field
+  unitName?: string
   customerName?: string
   notes?: string
   createdAt: string
+  createdBy?: string
+  createdByName?: string
+  cancellationReason?: string
+  cancelledAt?: string
+  cancelledByName?: string
 }
 
 interface GetFnbOrdersResponse {
@@ -185,17 +189,15 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Add session filter if provided
+    // Add filters
     if (validatedParams.sessionId) {
       whereClause.rentalSessionId = validatedParams.sessionId
     }
 
-    // Add status filter if provided
     if (validatedParams.status) {
       whereClause.status = validatedParams.status
     }
 
-    // Add date range filter if provided
     if (validatedParams.startDate || validatedParams.endDate) {
       whereClause.createdAt = {}
       if (validatedParams.startDate) {
@@ -230,6 +232,20 @@ export async function GET(request: NextRequest) {
               }
             }
           },
+          createdByUser: {
+            select: {
+              id: true,
+              name: true,
+              email: true
+            }
+          },
+          cancelledByUser: {
+            select: {
+              id: true,
+              name: true,
+              email: true
+            }
+          },
           transactions: {
             select: {
               id: true,
@@ -254,21 +270,15 @@ export async function GET(request: NextRequest) {
       })
     ])
 
-    // ===== FORMAT RESPONSE - Updated with correct paymentTiming =====
+    // ===== FORMAT RESPONSE - Updated with cancellation info =====
     const formattedOrders: FnbOrder[] = orders.map(order => {
-      // CRITICAL FIX: Determine payment timing correctly
-      // If order has immediate transaction, it was paid immediately
-      // If order is attached to session and has no transaction, it's end_of_session
-      // If order is standalone and has no transaction, it's pending immediate payment
-      
+      // Determine payment timing correctly
       let paymentTiming: 'immediate' | 'end_of_session' = 'immediate'
       
       if (order.rentalSessionId) {
-        // Order attached to session
         const hasTransaction = order.transactions && order.transactions.length > 0
         paymentTiming = hasTransaction ? 'immediate' : 'end_of_session'
       } else {
-        // Standalone order - always immediate payment
         paymentTiming = 'immediate'
       }
 
@@ -284,12 +294,17 @@ export async function GET(request: NextRequest) {
         })),
         totalAmount: decimalToNumber(order.totalAmount),
         status: order.status as 'pending' | 'completed' | 'cancelled',
-        paymentTiming: paymentTiming, // FIXED: Use correct logic
+        paymentTiming: paymentTiming,
         rentalSessionId: order.rentalSessionId || undefined,
         unitName: order.rentalSession?.unit?.name || undefined,
         customerName: order.rentalSession?.unit?.customerDisplayName || undefined,
         notes: undefined,
-        createdAt: order.createdAt.toISOString()
+        createdAt: order.createdAt.toISOString(),
+        createdBy: order.createdBy || undefined,
+        createdByName: order.createdByUser?.name || order.createdByUser?.email || undefined,
+        cancellationReason: order.cancellationReason || undefined,
+        cancelledAt: order.cancelledAt?.toISOString() || undefined,
+        cancelledByName: order.cancelledByUser?.name || order.cancelledByUser?.email || undefined
       }
     })
 
@@ -313,7 +328,6 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('Get F&B Orders API Error:', error)
 
-    // Handle Zod validation errors
     if (error instanceof z.ZodError) {
       return NextResponse.json(
         {
@@ -328,7 +342,6 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Handle other errors
     return NextResponse.json(
       {
         success: false,
@@ -350,12 +363,11 @@ export async function POST(request: NextRequest) {
     const session = await getServerSession(authOptions)
     if (!session?.user) {
       return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
+        { success: false, error: 'Authentication required' },
         { status: 401 }
       )
     }
 
-    // Check permissions
     if (session.user.role !== 'staff' && session.user.role !== 'owner') {
       return NextResponse.json(
         { success: false, error: 'Insufficient permissions' },
@@ -392,81 +404,45 @@ export async function POST(request: NextRequest) {
 
     // ===== VALIDATE REQUEST BODY =====
     const body = await request.json()
-    console.log('🍕 Received F&B order request:', body)
     const validatedData = createFnbOrderSchema.parse(body)
-    console.log('🍕 Validated F&B order data:', validatedData)
 
-    // ===== VERIFY RENTAL SESSION IF PROVIDED =====
-    if (validatedData.rentalSessionId) {
-      const rentalSession = await prisma.rentalSession.findFirst({
-        where: {
-          id: validatedData.rentalSessionId,
-          status: 'active',
-          unit: {
-            locationId: locationId
-          }
-        }
-      })
+    console.log('🍕 Creating F&B Order:', {
+      userId: session.user.id,
+      userName: session.user.name,
+      locationId,
+      itemCount: validatedData.items.length,
+      paymentTiming: validatedData.paymentTiming,
+      rentalSessionId: validatedData.rentalSessionId
+    })
 
-      if (!rentalSession) {
-        return NextResponse.json(
-          { 
-            success: false, 
-            error: 'Rental session not found or not active' 
-          },
-          { status: 404 }
-        )
-      }
-    }
-
-    // ===== FETCH AND VALIDATE F&B ITEMS =====
-    const itemIds = validatedData.items.map(item => item.fnbItemId)
+    // ===== VALIDATE F&B ITEMS AND CALCULATE TOTAL =====
     const fnbItems = await prisma.fnbItem.findMany({
       where: {
-        id: { in: itemIds },
+        id: { in: validatedData.items.map(item => item.fnbItemId) },
         locationId: locationId,
         isActive: true
       }
     })
 
-    if (fnbItems.length !== itemIds.length) {
-      const foundIds = fnbItems.map(item => item.id)
-      const missingIds = itemIds.filter(id => !foundIds.includes(id))
+    if (fnbItems.length !== validatedData.items.length) {
       return NextResponse.json(
-        { 
-          success: false, 
-          error: 'Some F&B items not found',
-          details: { missingItems: missingIds }
-        },
-        { status: 404 }
+        { success: false, error: 'Some F&B items not found or inactive' },
+        { status: 400 }
       )
     }
 
-    // ===== VALIDATE STOCK AVAILABILITY =====
-    for (const orderItem of validatedData.items) {
-      const fnbItem = fnbItems.find(item => item.id === orderItem.fnbItemId)
-      if (!fnbItem) continue
-
-      if (fnbItem.stockQuantity < orderItem.quantity) {
-        return NextResponse.json(
-          { 
-            success: false, 
-            error: `Insufficient stock for ${fnbItem.name}`,
-            details: { 
-              itemName: fnbItem.name,
-              requested: orderItem.quantity,
-              available: fnbItem.stockQuantity
-            }
-          },
-          { status: 400 }
-        )
-      }
-    }
-
-    // ===== CALCULATE TOTAL AMOUNT =====
+    // Validate stock and calculate order items
     let totalAmount = 0
     const orderItemsData = validatedData.items.map(orderItem => {
-      const fnbItem = fnbItems.find(item => item.id === orderItem.fnbItemId)!
+      const fnbItem = fnbItems.find(item => item.id === orderItem.fnbItemId)
+      if (!fnbItem) {
+        throw new Error(`F&B item not found: ${orderItem.fnbItemId}`)
+      }
+
+      if (fnbItem.stockQuantity < orderItem.quantity) {
+        throw new Error(`Insufficient stock for ${fnbItem.name}. Available: ${fnbItem.stockQuantity}`)
+      }
+
       const itemTotal = Number(fnbItem.sellingPrice) * orderItem.quantity
       totalAmount += itemTotal
 
@@ -480,31 +456,31 @@ export async function POST(request: NextRequest) {
 
     // ===== CREATE ORDER AND DEDUCT STOCK =====
     const result = await prisma.$transaction(async (tx) => {
-      // CRITICAL FIX: Set correct status based on payment timing
       const initialStatus = validatedData.paymentTiming === 'immediate' ? 'completed' : 'pending'
       
       console.log(`🍕 Creating F&B order with:`, {
         paymentTiming: validatedData.paymentTiming,
         initialStatus,
         rentalSessionId: validatedData.rentalSessionId,
-        totalAmount
+        totalAmount,
+        createdBy: session.user.id
       })
       
-      // Create F&B order with correct status
+      // Create F&B order with createdBy field
       const fnbOrder = await tx.fnbOrder.create({
         data: {
           rentalSessionId: validatedData.rentalSessionId || null,
+          createdBy: session.user.id,
           totalAmount: totalAmount,
-          status: initialStatus  // FIXED: Use correct status based on payment timing
+          status: initialStatus
         }
       })
 
-      console.log(`✅ F&B order created with ID: ${fnbOrder.id}, Status: ${fnbOrder.status}`)
+      console.log(`✅ F&B order created with ID: ${fnbOrder.id}, Status: ${fnbOrder.status}, Created by: ${session.user.name}`)
 
       // Create order items and deduct stock
       const fnbOrderItems = []
       for (const itemData of orderItemsData) {
-        // Create order item
         const orderItem = await tx.fnbOrderItem.create({
           data: {
             fnbOrderId: fnbOrder.id,
@@ -545,6 +521,29 @@ export async function POST(request: NextRequest) {
         console.log(`💳 Transaction created for immediate payment: ${transaction.id}`)
       }
 
+      // Create audit log
+      await tx.auditLog.create({
+        data: {
+          userId: session.user.id,
+          tenantId: session.user.tenantId,
+          locationId: locationId,
+          eventType: 'FNB_ORDER_CREATED',
+          severity: 'LOW',
+          ipAddress: 'system',
+          resourceType: 'fnb_order',
+          resourceId: fnbOrder.id,
+          metadata: {
+            orderId: fnbOrder.id,
+            totalAmount: totalAmount,
+            itemCount: validatedData.items.length,
+            paymentTiming: validatedData.paymentTiming,
+            paymentMethod: validatedData.paymentMethod,
+            rentalSessionId: validatedData.rentalSessionId,
+            createdByName: session.user.name || session.user.email
+          }
+        }
+      })
+
       return { fnbOrder, fnbOrderItems }
     })
 
@@ -566,7 +565,8 @@ export async function POST(request: NextRequest) {
       orderId: result.fnbOrder.id,
       status: result.fnbOrder.status,
       paymentTiming: validatedData.paymentTiming,
-      paymentStatus: response.data.paymentStatus
+      paymentStatus: response.data.paymentStatus,
+      createdBy: session.user.name
     })
 
     return NextResponse.json(response)
@@ -574,7 +574,6 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Create F&B Order API Error:', error)
 
-    // Handle Zod validation errors
     if (error instanceof z.ZodError) {
       return NextResponse.json(
         {
@@ -589,7 +588,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Handle other errors
     return NextResponse.json(
       {
         success: false,

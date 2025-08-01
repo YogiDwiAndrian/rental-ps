@@ -262,7 +262,7 @@ model User {
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
-  // Relations
+  // Relations - FIXED: Remove duplicate FnbOrder relation
   tenant              Tenant?              @relation(fields: [tenantId], references: [id])
   accounts            Account[]
   sessions            Session[]
@@ -270,10 +270,15 @@ model User {
   whatsappContacts    WhatsAppContact[]
   auditLogs           AuditLog[]
   userPreference      UserPreference?
+  workSessions        WorkSession[]
+  createdFnbOrders    FnbOrder[]           @relation("FnbOrderCreatedBy")
+  cancelledFnbOrders  FnbOrder[]           @relation("FnbOrderCancelledBy")
 
-  // NEW: Work Session Relations
-  workSessions WorkSession[]
-
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@index([email])
+  @@index([role])
+  @@index([isActive])
   @@map("users")
 }
 
@@ -495,18 +500,27 @@ model FnbItem {
 }
 
 model FnbOrder {
-  id              String   @id @default(cuid())
-  rentalSessionId String?  @map("rental_session_id")
-  totalAmount     Decimal  @map("total_amount") @db.Decimal(10, 2)
-  status          String   @default("completed")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  id                 String    @id @default(cuid())
+  rentalSessionId    String?   @map("rental_session_id")
+  createdBy          String?   @map("created_by")
+  cancellationReason String?   @map("cancellation_reason")
+  cancelledAt        DateTime? @map("cancelled_at")
+  cancelledBy        String?   @map("cancelled_by")
+  totalAmount        Decimal   @map("total_amount") @db.Decimal(10, 2)
+  status             String    @default("completed")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
 
-  // Relations
-  rentalSession RentalSession? @relation(fields: [rentalSessionId], references: [id])
-  fnbOrderItems FnbOrderItem[]
-  transactions  Transaction[]
+  // Relations - FIXED: Remove duplicate relations
+  rentalSession   RentalSession? @relation(fields: [rentalSessionId], references: [id])
+  createdByUser   User?          @relation("FnbOrderCreatedBy", fields: [createdBy], references: [id])
+  cancelledByUser User?          @relation("FnbOrderCancelledBy", fields: [cancelledBy], references: [id])
+  fnbOrderItems   FnbOrderItem[]
+  transactions    Transaction[]
 
+  @@index([createdBy])
+  @@index([cancelledBy])
+  @@index([cancelledAt])
   @@map("fnb_orders")
 }
 

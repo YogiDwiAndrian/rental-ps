@@ -1,31 +1,26 @@
-// src/components/staff/stop-session-dialog-content.tsx
+// src/components/staff/stop-session-dialog-content.tsx - FIXED total calculation
 'use client'
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Separator } from '@/components/ui/separator'
-import { Alert, AlertDescription } from '@/components/ui/alert'
 import { 
-  Calculator,
-  Coffee,
+  Calculator, 
+  AlertTriangle, 
+  Coffee, 
+  RefreshCw,
   CreditCard,
   Banknote,
   Smartphone,
   Clock,
-  ShoppingCart,
-  Receipt,
-  AlertTriangle,
   CheckCircle2,
-  Timer,
-  Package,
-  DollarSign,
-  Info,
-  RefreshCw,
-  FileText
+  XCircle,
+  DollarSign
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -66,6 +61,9 @@ interface AttachedFnbOrder {
   items: FnbOrderItem[]
   createdAt: string
   paidAt?: string
+  cancellationReason?: string    // FIXED: Add this field
+  cancelledAt?: string          // FIXED: Add this field
+  cancelledByName?: string      // FIXED: Add this field
 }
 
 interface StopFormData {
@@ -93,23 +91,15 @@ interface StopSessionDialogContentProps {
 }
 
 // ============================================
-// HELPER FUNCTIONS
+// UTILITY FUNCTIONS
 // ============================================
 
 const formatCurrency = (amount: number): string => {
   return new Intl.NumberFormat('id-ID', {
     style: 'currency',
     currency: 'IDR',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
+    minimumFractionDigits: 0
   }).format(amount)
-}
-
-const formatTime = (dateString: string): string => {
-  return new Date(dateString).toLocaleTimeString('id-ID', {
-    hour: '2-digit',
-    minute: '2-digit'
-  })
 }
 
 const getPaymentMethodInfo = (method: string) => {
@@ -141,6 +131,45 @@ const getPaymentMethodInfo = (method: string) => {
   }
 }
 
+const getFnbStatusIcon = (status: string) => {
+  switch (status) {
+    case 'completed':
+      return <DollarSign className="w-3 h-3" />
+    case 'cancelled':
+      return <XCircle className="w-3 h-3" />
+    case 'pending':
+      return <Clock className="w-3 h-3" />
+    default:
+      return <Clock className="w-3 h-3" />
+  }
+}
+
+const getFnbStatusColor = (status: string): string => {
+  switch (status) {
+    case 'completed':
+      return 'bg-green-50 text-green-700 border-green-200'
+    case 'cancelled':
+      return 'bg-red-50 text-red-700 border-red-200'
+    case 'pending':
+      return 'bg-orange-50 text-orange-700 border-orange-200'
+    default:
+      return 'bg-gray-50 text-gray-700 border-gray-200'
+  }
+}
+
+const getFnbStatusText = (status: string): string => {
+  switch (status) {
+    case 'completed':
+      return 'Sudah Dibayar'
+    case 'cancelled':
+      return 'Dibatalkan'
+    case 'pending':
+      return 'Belum Dibayar'
+    default:
+      return status
+  }
+}
+
 // ============================================
 // MAIN COMPONENT
 // ============================================
@@ -157,11 +186,16 @@ export function StopSessionDialogContent({
 }: StopSessionDialogContentProps) {
   const paymentInfo = getPaymentMethodInfo(formData.paymentMethod)
   
-  // Separate orders by payment timing
-  const immediateOrders = attachedFnbOrders.filter(order => order.paymentTiming === 'immediate')
-  const endOfSessionOrders = attachedFnbOrders.filter(order => order.paymentTiming === 'end_of_session')
+  // FIXED: Separate orders by payment timing AND exclude cancelled orders
+  const immediateOrders = attachedFnbOrders.filter(order => 
+    order.paymentTiming === 'immediate' && order.status !== 'cancelled'
+  )
+  const endOfSessionOrders = attachedFnbOrders.filter(order => 
+    order.paymentTiming === 'end_of_session' && order.status !== 'cancelled'
+  )
+  const cancelledOrders = attachedFnbOrders.filter(order => order.status === 'cancelled')
   
-  // Calculate totals
+  // FIXED: Calculate totals - only include non-cancelled orders
   const totalImmediateFnb = immediateOrders.reduce((sum, order) => sum + order.totalAmount, 0)
   const totalEndOfSessionFnb = endOfSessionOrders.reduce((sum, order) => sum + order.totalAmount, 0)
   const finalTotal = sessionCost.totalCost + totalEndOfSessionFnb + formData.fnbAmount
@@ -193,312 +227,272 @@ export function StopSessionDialogContent({
           
           <div className="space-y-1">
             <div className="flex items-center justify-between text-sm">
-              <span>{session.billingModel === 'timer' ? 'Biaya Bermain' : 'Biaya Dasar'}</span>
+              <span>{session.billingModel === 'timer' ? 'Durasi Bermain' : 'Biaya Dasar'}:</span>
               <span className="font-medium">{formatCurrency(sessionCost.baseCost)}</span>
             </div>
             
             {sessionCost.overtimeCost > 0 && (
               <div className="flex items-center justify-between text-sm">
-                <span className="text-amber-700">Biaya Overtime</span>
-                <span className="font-medium text-amber-700">{formatCurrency(sessionCost.overtimeCost)}</span>
+                <span className="text-amber-600">Biaya Overtime:</span>
+                <span className="font-medium text-amber-600">+ {formatCurrency(sessionCost.overtimeCost)}</span>
               </div>
             )}
             
-            <Separator />
-            
+            <div className="flex items-center justify-between text-base font-semibold border-t pt-1">
+              <span>Total Session:</span>
+              <span className="text-blue-600">{formatCurrency(sessionCost.totalCost)}</span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* F&B Orders Attached to Session */}
+      {attachedFnbOrders.length > 0 && (
+        <Card className="border">
+          <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
-              <span className="font-medium">Total Session</span>
-              <span className="text-lg font-bold text-blue-600">{formatCurrency(sessionCost.totalCost)}</span>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Coffee className="w-4 h-4 text-orange-600" />
+                Pesanan F&B Terlampir
+              </CardTitle>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={onRefreshFnb}
+                disabled={fetchingFnb}
+                className="h-7 w-7 p-0"
+              >
+                <RefreshCw className={cn("w-3 h-3", fetchingFnb && "animate-spin")} />
+              </Button>
             </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* F&B Orders Section */}
-      <Card className="border">
-        <CardHeader className="pb-2">
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Coffee className="w-4 h-4 text-orange-600" />
-              F&B Orders
-            </CardTitle>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onRefreshFnb}
-              disabled={fetchingFnb}
-              className="h-7 px-2"
-            >
-              <RefreshCw className={cn("w-3 h-3", fetchingFnb && "animate-spin")} />
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {attachedFnbOrders.length > 0 ? (
-            <div className="space-y-2">
-              {/* End of Session Orders (Belum Bayar) */}
-              {endOfSessionOrders.length > 0 && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200 text-xs">
-                      <ShoppingCart className="w-3 h-3 mr-1" />
-                      Bayar Bersamaan
-                    </Badge>
-                    <span className="text-xs text-gray-600">{endOfSessionOrders.length} pesanan</span>
-                  </div>
-                  
-                  {endOfSessionOrders.map((order) => (
-                    <div key={order.id} className="p-2 bg-orange-50 rounded-lg border border-orange-200">
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="flex items-center gap-2">
-                          <Receipt className="w-3 h-3 text-orange-600" />
-                          <span className="text-xs font-medium">#{order.id.slice(-6)}</span>
-                          <Badge variant="outline" className="text-xs px-1 py-0">
-                            {order.status}
-                          </Badge>
-                        </div>
-                        <span className="font-semibold text-orange-700 text-sm">
-                          {formatCurrency(order.totalAmount)}
-                        </span>
-                      </div>
-                      
-                      <div className="space-y-0.5">
-                        {order.items.map((item) => (
-                          <div key={item.id} className="flex items-center justify-between text-xs">
-                            <span className="truncate flex-1 mr-2">
-                              {item.quantity}x {item.fnbItemName}
-                            </span>
-                            <span>{formatCurrency(item.totalPrice)}</span>
-                          </div>
-                        ))}
-                      </div>
-                      
-                      <div className="text-xs text-gray-500 mt-1">
-                        {formatTime(order.createdAt)}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Immediate Payment Orders (Sudah Bayar) */}
-              {immediateOrders.length > 0 && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 text-xs">
-                      <CheckCircle2 className="w-3 h-3 mr-1" />
-                      Sudah Dibayar
-                    </Badge>
-                    <span className="text-xs text-gray-600">{immediateOrders.length} pesanan</span>
-                  </div>
-                  
-                  {immediateOrders.map((order) => (
-                    <div key={order.id} className="p-2 bg-green-50 rounded-lg border border-green-200">
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="flex items-center gap-2">
-                          <Receipt className="w-3 h-3 text-green-600" />
-                          <span className="text-xs font-medium">#{order.id.slice(-6)}</span>
-                          <Badge variant="outline" className="text-xs px-1 py-0 bg-green-100">
-                            Lunas
-                          </Badge>
-                        </div>
-                        <span className="font-semibold text-green-700 text-sm">
-                          {formatCurrency(order.totalAmount)}
-                        </span>
-                      </div>
-                      
-                      <div className="space-y-0.5">
-                        {order.items.map((item) => (
-                          <div key={item.id} className="flex items-center justify-between text-xs">
-                            <span className="truncate flex-1 mr-2">
-                              {item.quantity}x {item.fnbItemName}
-                            </span>
-                            <span>{formatCurrency(item.totalPrice)}</span>
-                          </div>
-                        ))}
-                      </div>
-                      
-                      <div className="text-xs text-gray-500 mt-1">
-                        {order.paidAt ? formatTime(order.paidAt) : formatTime(order.createdAt)}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* F&B Summary */}
-              {totalEndOfSessionFnb > 0 && (
-                <>
-                  <Separator />
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium text-sm">F&B Belum Bayar</span>
-                    <span className="text-lg font-bold text-orange-600">{formatCurrency(totalEndOfSessionFnb)}</span>
-                  </div>
-                </>
-              )}
-            </div>
-          ) : (
-            <div className="text-center py-3 text-gray-500">
-              <Coffee className="w-6 h-6 mx-auto mb-1 text-gray-300" />
-              <p className="text-xs">Tidak ada pesanan F&B</p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Payment Method Selection */}
-      <Card className="border">
-        <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <CreditCard className="w-4 h-4 text-green-600" />
-            Metode Pembayaran
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          <Select
-            value={formData.paymentMethod}
-            onValueChange={(value: 'cash' | 'card' | 'digital_wallet') =>
-              onFormDataChange({ paymentMethod: value })
-            }
-          >
-            <SelectTrigger className="h-9">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="cash">
-                <div className="flex items-center gap-2">
-                  <Banknote className="w-4 h-4 text-green-600" />
-                  <span>Tunai</span>
-                </div>
-              </SelectItem>
-              <SelectItem value="card">
-                <div className="flex items-center gap-2">
-                  <CreditCard className="w-4 h-4 text-blue-600" />
-                  <span>Kartu</span>
-                </div>
-              </SelectItem>
-              <SelectItem value="digital_wallet">
-                <div className="flex items-center gap-2">
-                  <Smartphone className="w-4 h-4 text-purple-600" />
-                  <span>E-Wallet</span>
-                </div>
-              </SelectItem>
-            </SelectContent>
-          </Select>
-
-          {/* Payment Method Info */}
-          <div className="p-2 bg-gray-50 rounded-lg">
-            <div className="flex items-center gap-2">
-              <div className="p-1 rounded bg-white">
-                {paymentInfo.icon}
-              </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            
+            {/* Active Orders (will be paid with session) */}
+            {endOfSessionOrders.length > 0 && (
               <div>
-                <p className="font-medium text-gray-900 text-sm">{paymentInfo.label}</p>
-                <p className="text-xs text-gray-600">
-                  {formData.paymentMethod === 'cash' && 'Pembayaran dengan uang tunai'}
-                  {formData.paymentMethod === 'card' && 'Pembayaran dengan kartu debit/kredit'}
-                  {formData.paymentMethod === 'digital_wallet' && 'OVO, GoPay, DANA, dll'}
-                </p>
+                <h5 className="text-sm font-medium text-green-700 mb-2">
+                  Akan Dibayar Bersamaan (End of Session)
+                </h5>
+                <div className="space-y-2">
+                  {endOfSessionOrders.map((order) => (
+                    <div key={order.id} className="p-2 bg-green-50 rounded border border-green-200">
+                      <div className="flex items-center justify-between mb-1">
+                        <Badge variant="outline" className={getFnbStatusColor(order.status)}>
+                          {getFnbStatusIcon(order.status)}
+                          <span className="ml-1">{getFnbStatusText(order.status)}</span>
+                        </Badge>
+                        <span className="font-medium text-green-700">{formatCurrency(order.totalAmount)}</span>
+                      </div>
+                      <div className="text-xs text-gray-600">
+                        {order.items.map(item => `${item.quantity}x ${item.fnbItemName}`).join(', ')}
+                      </div>
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between text-sm font-medium border-t pt-1">
+                    <span>Subtotal F&B:</span>
+                    <span className="text-green-600">{formatCurrency(totalEndOfSessionFnb)}</span>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+            )}
 
-      {/* Notes Section */}
+            {/* Already Paid Orders (immediate payment) */}
+            {immediateOrders.length > 0 && (
+              <div>
+                <h5 className="text-sm font-medium text-blue-700 mb-2">
+                  Sudah Dibayar Sebelumnya (Immediate)
+                </h5>
+                <div className="space-y-2">
+                  {immediateOrders.map((order) => (
+                    <div key={order.id} className="p-2 bg-blue-50 rounded border border-blue-200">
+                      <div className="flex items-center justify-between mb-1">
+                        <Badge variant="outline" className={getFnbStatusColor(order.status)}>
+                          {getFnbStatusIcon(order.status)}
+                          <span className="ml-1">{getFnbStatusText(order.status)}</span>
+                        </Badge>
+                        <span className="font-medium text-blue-700">{formatCurrency(order.totalAmount)}</span>
+                      </div>
+                      <div className="text-xs text-gray-600">
+                        {order.items.map(item => `${item.quantity}x ${item.fnbItemName}`).join(', ')}
+                      </div>
+                    </div>
+                  ))}
+                  <div className="text-xs text-blue-600">
+                    Tidak dihitung dalam total (sudah dibayar)
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Cancelled Orders (shown for info but not calculated) */}
+            {cancelledOrders.length > 0 && (
+              <div>
+                <h5 className="text-sm font-medium text-gray-600 mb-2">
+                  Pesanan Dibatalkan
+                </h5>
+                <div className="space-y-2">
+                  {cancelledOrders.map((order) => (
+                    <div key={order.id} className="p-2 bg-gray-50 rounded border border-gray-200 opacity-75">
+                      <div className="flex items-center justify-between mb-1">
+                        <Badge variant="outline" className={getFnbStatusColor(order.status)}>
+                          {getFnbStatusIcon(order.status)}
+                          <span className="ml-1">{getFnbStatusText(order.status)}</span>
+                        </Badge>
+                        <span className="font-medium text-gray-500 line-through">{formatCurrency(order.totalAmount)}</span>
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {order.items.map(item => `${item.quantity}x ${item.fnbItemName}`).join(', ')}
+                      </div>
+                    </div>
+                  ))}
+                  <div className="text-xs text-gray-500">
+                    Tidak dihitung dalam total (dibatalkan)
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* No F&B Orders */}
+            {attachedFnbOrders.length === 0 && !fetchingFnb && (
+              <div className="text-center py-4 text-gray-500">
+                <Coffee className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">Tidak ada pesanan F&B untuk session ini</p>
+              </div>
+            )}
+
+            {/* Loading State */}
+            {fetchingFnb && (
+              <div className="text-center py-4">
+                <RefreshCw className="w-6 h-6 mx-auto mb-2 text-gray-400 animate-spin" />
+                <p className="text-sm text-gray-600">Memuat pesanan F&B...</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Manual F&B Amount */}
       <Card className="border">
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-base">
-            <FileText className="w-4 h-4 text-gray-600" />
-            Catatan
+            <Coffee className="w-4 h-4 text-purple-600" />
+            F&B Manual / Tambahan
           </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-3">
           <div className="space-y-2">
-            <Label htmlFor="notes" className="text-sm font-medium">
-              Catatan untuk session ini (opsional)
+            <Label htmlFor="fnbAmount" className="text-sm">
+              Jumlah F&B Tambahan (Opsional)
             </Label>
-            <Textarea
-              id="notes"
-              placeholder="Catatan opsional..."
-              value={formData.notes}
-              onChange={(e) => onFormDataChange({ notes: e.target.value })}
-              className="min-h-[50px] resize-none text-sm"
-              rows={2}
+            <Input
+              id="fnbAmount"
+              type="number"
+              min="0"
+              value={formData.fnbAmount || ''}
+              onChange={(e) => onFormDataChange({ 
+                fnbAmount: parseInt(e.target.value) || 0 
+              })}
+              placeholder="0"
+              className="text-right"
             />
             <p className="text-xs text-gray-500">
-              Catatan akan tersimpan dalam riwayat session
+              Untuk item F&B yang tidak tercatat dalam sistem
             </p>
           </div>
         </CardContent>
       </Card>
 
-      {/* Final Total Summary */}
-      <Card className="border-2 border-green-200 bg-green-50">
-        <CardContent className="p-3">
+      {/* Payment Method */}
+      <Card className="border">
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <CreditCard className="w-4 h-4 text-indigo-600" />
+            Metode Pembayaran
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Select
+            value={formData.paymentMethod}
+            onValueChange={(value: 'cash' | 'card' | 'digital_wallet') => 
+              onFormDataChange({ paymentMethod: value })
+            }
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="cash">
+                <div className="flex items-center">
+                  <Banknote className="w-4 h-4 mr-2" />
+                  Tunai
+                </div>
+              </SelectItem>
+              <SelectItem value="card">
+                <div className="flex items-center">
+                  <CreditCard className="w-4 h-4 mr-2" />
+                  Kartu Debit/Kredit
+                </div>
+              </SelectItem>
+              <SelectItem value="digital_wallet">
+                <div className="flex items-center">
+                  <Smartphone className="w-4 h-4 mr-2" />
+                  E-Wallet (OVO, GoPay, dll)
+                </div>
+              </SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Badge variant="outline" className={paymentInfo.color}>
+            {paymentInfo.icon}
+            <span className="ml-2">{paymentInfo.label}</span>
+          </Badge>
+        </CardContent>
+      </Card>
+
+      {/* Additional Notes */}
+      <Card className="border">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Catatan</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Textarea
+            placeholder="Catatan tambahan untuk session ini..."
+            value={formData.notes}
+            onChange={(e) => onFormDataChange({ notes: e.target.value })}
+            rows={3}
+            className="resize-none"
+          />
+        </CardContent>
+      </Card>
+
+      {/* Total Summary */}
+      <Card className="border-2 border-indigo-200 bg-indigo-50">
+        <CardContent className="pt-4">
           <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <Receipt className="w-4 h-4 text-green-600" />
-              <h3 className="text-base font-bold text-green-900">Ringkasan Pembayaran</h3>
+            <div className="flex items-center justify-between text-sm">
+              <span>Biaya Session:</span>
+              <span>{formatCurrency(sessionCost.totalCost)}</span>
             </div>
             
-            <div className="space-y-1">
+            {totalEndOfSessionFnb > 0 && (
               <div className="flex items-center justify-between text-sm">
-                <span className="text-green-700">Biaya Session</span>
-                <span className="font-medium">{formatCurrency(sessionCost.totalCost)}</span>
-              </div>
-              
-              {totalEndOfSessionFnb > 0 && (
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-green-700">F&B (Belum Bayar)</span>
-                  <span className="font-medium">{formatCurrency(totalEndOfSessionFnb)}</span>
-                </div>
-              )}
-              
-              {formData.fnbAmount > 0 && (
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-green-700">F&B Tambahan</span>
-                  <span className="font-medium">{formatCurrency(formData.fnbAmount)}</span>
-                </div>
-              )}
-              
-              <Separator />
-              
-              <div className="flex items-center justify-between">
-                <span className="text-lg font-bold text-green-900">Total Bayar</span>
-                <span className="text-2xl font-bold text-green-700">
-                  {formatCurrency(finalTotal)}
-                </span>
-              </div>
-            </div>
-
-            {/* Payment Method Display */}
-            <div className="pt-2 border-t border-green-200">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-green-700">Metode Pembayaran:</span>
-                <Badge variant="outline" className={cn("border", paymentInfo.color)}>
-                  {paymentInfo.icon}
-                  <span className="ml-2 text-xs">{paymentInfo.label}</span>
-                </Badge>
-              </div>
-            </div>
-
-            {/* Additional Info */}
-            {(totalImmediateFnb > 0 || session.isOvertime) && (
-              <div className="pt-2 p-2 bg-blue-50 border border-blue-200 rounded-lg">
-                <div className="flex gap-2">
-                  <Info className="w-3 h-3 text-blue-600 flex-shrink-0 mt-0.5" />
-                  <div className="text-xs text-blue-700 space-y-0.5">
-                    {totalImmediateFnb > 0 && (
-                      <p>• F&B {formatCurrency(totalImmediateFnb)} sudah dibayar sebelumnya</p>
-                    )}
-                    {session.isOvertime && (
-                      <p>• Overtime lebih dari 5 menit dikenakan biaya tambahan</p>
-                    )}
-                  </div>
-                </div>
+                <span>F&B (End of Session):</span>
+                <span>{formatCurrency(totalEndOfSessionFnb)}</span>
               </div>
             )}
+            
+            {formData.fnbAmount > 0 && (
+              <div className="flex items-center justify-between text-sm">
+                <span>F&B Manual:</span>
+                <span>{formatCurrency(formData.fnbAmount)}</span>
+              </div>
+            )}
+            
+            <div className="flex items-center justify-between text-lg font-bold border-t pt-2">
+              <span>TOTAL BAYAR:</span>
+              <span className="text-indigo-600">{formatCurrency(finalTotal)}</span>
+            </div>
           </div>
         </CardContent>
       </Card>
