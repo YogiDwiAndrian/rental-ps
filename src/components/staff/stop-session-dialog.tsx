@@ -1,4 +1,4 @@
-// src/components/staff/stop-session-dialog.tsx
+// src/components/staff/stop-session-dialog.tsx - COMPLETE dengan export function
 'use client'
 
 import { useState, useEffect } from 'react'
@@ -171,29 +171,8 @@ const calculateSessionCost = (
   return { baseCost: 0, overtimeCost: 0, totalCost: 0, hourlyRate }
 }
 
-interface FnbOrderApiResponse {
-  success: boolean
-  data?: Array<{
-    id: string
-    totalAmount: number
-    status: 'pending' | 'completed' | 'cancelled'
-    paymentTiming?: 'immediate' | 'end_of_session'
-    items: Array<{
-      id: string
-      fnbItemId: string
-      fnbItemName: string
-      quantity: number
-      unitPrice: number
-      totalPrice: number
-    }>
-    createdAt: string
-    paidAt?: string
-  }>
-  error?: string
-}
-
 // ============================================
-// MAIN COMPONENT
+// MAIN COMPONENT - DENGAN EXPORT
 // ============================================
 
 export function StopSessionDialog({ 
@@ -228,25 +207,37 @@ export function StopSessionDialog({
   }
 
   // ============================================
-  // DERIVED VALUES
+  // DERIVED VALUES - FIXED CALCULATION
   // ============================================
 
   const sessionDuration = session ? formatDuration(session.startTime) : '0 menit'
   const actualMinutes = session ? calculateActualDuration(session.startTime) : 0
-  
-  // Calculate F&B totals
+
+  // FIXED: Calculate F&B totals correctly - separate by payment timing
+  const immediatePaymentOrders = attachedFnbOrders.filter(order => 
+    order.paymentTiming === 'immediate' && order.status !== 'cancelled'
+  )
   const endOfSessionOrders = attachedFnbOrders.filter(order => 
-  order.paymentTiming === 'end_of_session' && 
-  order.status !== 'cancelled'
-)
+    order.paymentTiming === 'end_of_session' && order.status !== 'cancelled'
+  )
+
+  const totalImmediatePaymentFnb = immediatePaymentOrders.reduce((sum, order) => sum + order.totalAmount, 0)
   const totalEndOfSessionFnb = endOfSessionOrders.reduce((sum, order) => sum + order.totalAmount, 0)
+
+  // FIXED: Final total ONLY includes session cost + end_of_session F&B + manual F&B
+  // Immediate payments are EXCLUDED because they're already paid
   const finalTotal = sessionCost.totalCost + totalEndOfSessionFnb + formData.fnbAmount
 
-  const immediatePaymentOrders = attachedFnbOrders.filter(order => 
-  order.paymentTiming === 'immediate' && 
-  order.status !== 'cancelled'
-)
-const totalImmediatePaymentFnb = immediatePaymentOrders.reduce((sum, order) => sum + order.totalAmount, 0)
+  console.log('💰 Stop Session Calculation Fixed:', {
+    sessionCost: sessionCost.totalCost,
+    immediatePaymentFnb: totalImmediatePaymentFnb,
+    endOfSessionFnb: totalEndOfSessionFnb, 
+    manualFnb: formData.fnbAmount,
+    finalTotal: finalTotal,
+    immediateOrdersCount: immediatePaymentOrders.length,
+    endOfSessionOrdersCount: endOfSessionOrders.length,
+    note: 'Immediate payments excluded from final total - already paid separately'
+  })
 
   // ============================================
   // F&B ORDERS FETCH
@@ -257,17 +248,20 @@ const totalImmediatePaymentFnb = immediatePaymentOrders.reduce((sum, order) => s
     
     setFetchingFnb(true)
     try {
-      // Use correct endpoint for F&B orders with session filter
-      const response = await fetch(`/api/fnb/orders?sessionId=${session.id}&limit=50`, {
-        headers: {
-          'X-Location-ID': locationId
-        }
-      })
+      const response = await fetch(`/api/rentals/${session.id}/fnb-orders?locationId=${locationId}`)
       
-      const result: FnbOrderApiResponse = await response.json()
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
+      const result: GetSessionFnbOrdersResponse = await response.json()
+      
+      if (!isGetSessionFnbOrdersResponse(result)) {
+        throw new Error('Invalid response format')
+      }
       
       if (result.success && result.data) {
-        const orders: AttachedFnbOrder[] = result.data.map((order) => ({
+        const orders: AttachedFnbOrder[] = result.data.map((order: ApiFnbOrder) => ({
           id: order.id,
           totalAmount: order.totalAmount,
           status: order.status,
@@ -275,7 +269,7 @@ const totalImmediatePaymentFnb = immediatePaymentOrders.reduce((sum, order) => s
           items: order.items.map(item => ({
             id: item.id,
             fnbItemId: item.fnbItemId,
-            fnbItemName: item.fnbItemName || 'Unknown Item',
+            fnbItemName: item.fnbItemName,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
             totalPrice: item.totalPrice
@@ -290,6 +284,7 @@ const totalImmediatePaymentFnb = immediatePaymentOrders.reduce((sum, order) => s
     } catch (error) {
       console.error('Error fetching F&B orders:', error)
       setAttachedFnbOrders([])
+      toast.error('Failed to load F&B orders')
     } finally {
       setFetchingFnb(false)
     }
@@ -299,27 +294,23 @@ const totalImmediatePaymentFnb = immediatePaymentOrders.reduce((sum, order) => s
   // FORM HANDLERS
   // ============================================
 
-  const handleFormDataChange = (data: Partial<StopFormData>): void => {
-    setFormData(prev => ({ ...prev, ...data }))
+  const handleFormDataChange = (newData: StopFormData) => {
+    setFormData(newData)
   }
 
-  const handleRefreshFnb = (): void => {
+  const handleRefreshFnb = () => {
     fetchAttachedFnbOrders()
   }
 
-  // ============================================
-  // SUBMIT HANDLER
-  // ============================================
-
-  const handleSubmit = async (): Promise<void> => {
-    if (!session || calculationError) return
+  const handleSubmit = async () => {
+    if (!session) return
 
     setLoading(true)
     try {
-      const stopRequest: StopSessionRequest = {
+      const requestData: StopSessionRequest = {
         paymentMethod: formData.paymentMethod,
         fnbAmount: formData.fnbAmount,
-        notes: formData.notes.trim() || undefined
+        notes: formData.notes
       }
 
       const response = await fetch(`/api/rentals/${session.id}/stop`, {
@@ -328,13 +319,27 @@ const totalImmediatePaymentFnb = immediatePaymentOrders.reduce((sum, order) => s
           'Content-Type': 'application/json',
           'X-Location-ID': locationId
         },
-        body: JSON.stringify(stopRequest)
+        body: JSON.stringify(requestData)
       })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
 
       const result: StopSessionResponse = await response.json()
 
       if (result.success) {
-        toast.success('Session berhasil dihentikan!')
+        console.log('✅ Session stopped successfully:', {
+          sessionId: session.id,
+          finalTotal: finalTotal,
+          sessionCost: sessionCost.totalCost,
+          endOfSessionFnb: totalEndOfSessionFnb,
+          manualFnb: formData.fnbAmount,
+          immediatePaymentsExcluded: totalImmediatePaymentFnb,
+          message: `Total billed: ${finalTotal} (excludes ${totalImmediatePaymentFnb} already paid F&B)`
+        })
+
+        toast.success('Session stopped successfully')
         onOpenChange(false)
         onSuccess?.()
       } else {
@@ -419,6 +424,10 @@ const totalImmediatePaymentFnb = immediatePaymentOrders.reduce((sum, order) => s
             calculationError={calculationError}
             onSubmit={handleSubmit}
             onCancel={handleCancel}
+            endOfSessionFnbTotal={totalEndOfSessionFnb}
+            immediatePaymentFnbTotal={totalImmediatePaymentFnb}
+            endOfSessionCount={endOfSessionOrders.length}
+            immediateCount={immediatePaymentOrders.length}
           />
         </div>
       </DialogContent>
