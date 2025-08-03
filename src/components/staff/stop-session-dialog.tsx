@@ -294,9 +294,12 @@ export function StopSessionDialog({
   // FORM HANDLERS
   // ============================================
 
-  const handleFormDataChange = (newData: StopFormData) => {
-    setFormData(newData)
-  }
+  const handleFormDataChange = (newData: Partial<StopFormData>) => {
+  setFormData(prev => ({
+    ...prev,
+    ...newData
+  }))
+}
 
   const handleRefreshFnb = () => {
     fetchAttachedFnbOrders()

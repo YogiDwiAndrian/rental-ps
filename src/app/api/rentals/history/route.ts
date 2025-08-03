@@ -166,10 +166,10 @@ export async function GET(request: NextRequest) {
 
       // F&B orders summary
       const fnbOrders = session.fnbOrders || []
-      const activeFnbOrders = fnbOrders.filter(order => order.status !== 'cancelled')
-      const hasFnbOrders = fnbOrders.length > 0
-      const fnbOrdersCount = fnbOrders.length
-      const fnbOrdersTotal = fnbOrders.reduce((sum: number, order: { totalAmount: Decimal }) => {
+      const validFnbOrders = fnbOrders.filter(order => order.status !== 'cancelled')
+      const hasFnbOrders = validFnbOrders.length > 0
+      const fnbOrdersCount = validFnbOrders.length
+      const fnbOrdersTotal = validFnbOrders.reduce((sum: number, order: { totalAmount: Decimal }) => {
         return sum + Number(order.totalAmount)
       }, 0)
 
