@@ -82,11 +82,6 @@ export function calculateBillingAmount(
       }
       break
 
-    case 'hybrid':
-      // For hybrid billing, default to timer calculation
-      baseAmount = Math.ceil(durationMinutes * (hourlyRate / 60))
-      break
-
     default:
       throw new Error(`Unsupported billing model: ${billingModel}`)
   }
@@ -221,13 +216,6 @@ export function validateSessionStart(
       // No specific validation needed for timer billing
       if (purchasedDuration) {
         warnings.push('Duration is ignored for timer billing')
-      }
-      break
-
-    case 'hybrid':
-      // Hybrid billing accepts both timer and package modes
-      if (purchasedDuration && purchasedDuration < 15) {
-        errors.push('Minimum duration is 15 minutes when specified')
       }
       break
   }

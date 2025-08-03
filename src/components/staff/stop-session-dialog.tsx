@@ -235,9 +235,18 @@ export function StopSessionDialog({
   const actualMinutes = session ? calculateActualDuration(session.startTime) : 0
   
   // Calculate F&B totals
-  const endOfSessionOrders = attachedFnbOrders.filter(order => order.paymentTiming === 'end_of_session')
+  const endOfSessionOrders = attachedFnbOrders.filter(order => 
+  order.paymentTiming === 'end_of_session' && 
+  order.status !== 'cancelled'
+)
   const totalEndOfSessionFnb = endOfSessionOrders.reduce((sum, order) => sum + order.totalAmount, 0)
   const finalTotal = sessionCost.totalCost + totalEndOfSessionFnb + formData.fnbAmount
+
+  const immediatePaymentOrders = attachedFnbOrders.filter(order => 
+  order.paymentTiming === 'immediate' && 
+  order.status !== 'cancelled'
+)
+const totalImmediatePaymentFnb = immediatePaymentOrders.reduce((sum, order) => sum + order.totalAmount, 0)
 
   // ============================================
   // F&B ORDERS FETCH
@@ -257,8 +266,6 @@ export function StopSessionDialog({
       
       const result: FnbOrderApiResponse = await response.json()
       
-      console.log('🍕 F&B Orders Response:', result)
-      
       if (result.success && result.data) {
         const orders: AttachedFnbOrder[] = result.data.map((order) => ({
           id: order.id,
@@ -276,11 +283,8 @@ export function StopSessionDialog({
           createdAt: order.createdAt,
           paidAt: order.paidAt
         }))
-        
-        console.log('🍕 Processed F&B Orders:', orders)
         setAttachedFnbOrders(orders)
       } else {
-        console.error('Failed to fetch F&B orders:', result.error)
         setAttachedFnbOrders([])
       }
     } catch (error) {

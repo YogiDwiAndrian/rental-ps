@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { z } from 'zod'
 import { Decimal } from '@prisma/client/runtime/library'
+import { RentalSession, SessionHistoryResponse } from '@/types/session'
 
 // ============================================
 // TYPES & VALIDATION
@@ -16,39 +17,6 @@ const querySchema = z.object({
   dateFrom: z.string().optional(),
   dateTo: z.string().optional()
 })
-
-interface RentalSession {
-  id: string
-  unitId: string
-  unitName: string
-  customerName?: string
-  billingModel: 'timer' | 'hourly' | 'package'
-  status: 'active' | 'completed' | 'cancelled'
-  startTime: string
-  endTime?: string
-  duration?: number
-  totalAmount: number
-  purchasedDuration: number
-  extendedDuration: number
-  notes?: string
-  createdBy?: string
-  createdByName?: string
-  hasFnbOrders: boolean
-  fnbOrdersCount: number
-  fnbOrdersTotal: number
-}
-
-interface SessionHistoryResponse {
-  success: boolean
-  data: RentalSession[]
-  pagination: {
-    page: number
-    limit: number
-    total: number
-    totalPages: number
-  }
-  message: string
-}
 
 // ============================================
 // GET /api/rentals/history
@@ -160,9 +128,17 @@ export async function GET(request: NextRequest) {
           select: {
             id: true,
             name: true,
-            customerDisplayName: true
           }
         },
+        createdByUser: { // ✅ ADDED: Include staff who created session
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        name: true,
+        email: true
+      }
+    },
         fnbOrders: {
           select: {
             id: true,
@@ -190,6 +166,7 @@ export async function GET(request: NextRequest) {
 
       // F&B orders summary
       const fnbOrders = session.fnbOrders || []
+      const activeFnbOrders = fnbOrders.filter(order => order.status !== 'cancelled')
       const hasFnbOrders = fnbOrders.length > 0
       const fnbOrdersCount = fnbOrders.length
       const fnbOrdersTotal = fnbOrders.reduce((sum: number, order: { totalAmount: Decimal }) => {
@@ -197,13 +174,17 @@ export async function GET(request: NextRequest) {
       }, 0)
 
       // Get unit display name
-      const unitName = session.unit.customerDisplayName || session.unit.name
+      const unitName = session.unit.name
 
+      const createdBy = session.createdBy || undefined
+      const createdByName = session.createdByUser ? `${session.createdByUser.firstName || ''} ${session.createdByUser.lastName || ''}`.trim() || session.createdByUser.name || session.createdByUser.email.split('@')[0] : undefined
+      const sessionAmount = Number(session.totalAmount)
+      const grandTotal = sessionAmount + fnbOrdersTotal
       return {
         id: session.id,
         unitId: session.unit.id,
         unitName,
-        customerName: session.unit.customerDisplayName || undefined,
+        customerName: session.customerName || undefined,
         billingModel: session.billingModel as 'timer' | 'hourly' | 'package',
         status: session.status as 'active' | 'completed' | 'cancelled',
         startTime: session.startTime.toISOString(),
@@ -213,11 +194,12 @@ export async function GET(request: NextRequest) {
         purchasedDuration: session.purchasedDuration,
         extendedDuration: session.extendedDuration,
         notes: undefined,
-        createdBy: undefined,
-        createdByName: undefined,
+        createdBy,
+        createdByName,
         hasFnbOrders,
         fnbOrdersCount,
-        fnbOrdersTotal
+        fnbOrdersTotal,
+        grandTotal 
       }
     })
 

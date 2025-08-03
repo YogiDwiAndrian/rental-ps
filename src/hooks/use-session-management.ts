@@ -5,6 +5,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
 import { toast } from 'sonner'
 import { BillingType } from '@prisma/client'
+import { StartSessionResponse } from '@/types/session'
 
 // ============================================
 // LOCAL TYPE DEFINITIONS (to avoid import issues)
@@ -29,21 +30,6 @@ export interface StartSessionRequest {
   purchasedDuration?: number
   packageId?: string
   notes?: string
-}
-
-export interface StartSessionResponse {
-  success: boolean
-  data?: {
-    sessionId: string
-    unitName: string
-    billingModel: BillingType
-    startTime: string
-    purchasedDuration?: number
-    totalAmount?: number
-    estimatedEndTime?: string
-  }
-  error?: string
-  details?: unknown
 }
 
 export interface StopSessionRequest {

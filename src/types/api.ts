@@ -101,17 +101,6 @@ export interface StartSessionRequest {
   notes?: string
 }
 
-export interface StartSessionResponse extends BaseApiResponse {
-  data?: {
-    sessionId: string
-    unitName: string
-    startTime: string
-    estimatedEndTime?: string
-    totalAmount: number
-    hourlyRate: number
-  }
-}
-
 export interface StopSessionRequest {
   paymentMethod: 'cash' | 'card' | 'digital_wallet'
   fnbAmount?: number

@@ -60,6 +60,11 @@ interface StopSessionDialogFooterProps {
   calculationError: string | null
   onSubmit: () => void
   onCancel: () => void
+  // ✅ ADDED: F&B breakdown props
+  endOfSessionFnbTotal?: number
+  immediatePaymentFnbTotal?: number
+  endOfSessionCount?: number
+  immediateCount?: number
 }
 
 // ============================================
@@ -120,57 +125,108 @@ export function StopSessionDialogFooter({
   loading,
   calculationError,
   onSubmit,
-  onCancel
+  onCancel,
+  // ✅ ADDED: F&B breakdown
+  endOfSessionFnbTotal = 0,
+  immediatePaymentFnbTotal = 0,
+  endOfSessionCount = 0,
+  immediateCount = 0
 }: StopSessionDialogFooterProps) {
-  const paymentInfo = getPaymentMethodInfo(formData.paymentMethod)
-  const isSubmitDisabled = loading || !!calculationError || finalTotal <= 0
+  const formatCurrency = (amount: number): string => {
+    return new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR',
+      minimumFractionDigits: 0
+    }).format(amount)
+  }
+
+   const isValidPayment = finalTotal >= 0 && !calculationError
 
   return (
-    <div className="bg-white">
-      {/* Compact Action Buttons */}
-      <DialogFooter className="px-3 sm:px-4 py-2 sm:py-3">
-        <div className="flex gap-2 w-full">
-          {/* Cancel Button */}
-          <Button 
-            variant="outline" 
-            onClick={onCancel} 
-            disabled={loading}
-            className="w-24 h-9 text-sm"
-          >
-            <Clock className="w-3 h-3 mr-1" />
-            Batal
-          </Button>
-
-          {/* Submit Button */}
-          <Button 
-            onClick={onSubmit} 
-            disabled={isSubmitDisabled}
-            className={cn(
-              "flex-1 h-9 text-white font-semibold text-sm",
-              loading 
-                ? "bg-gray-400" 
-                : `bg-gradient-to-r ${paymentInfo.actionColor}`
-            )}
-          >
-            {loading ? (
-              <>
-                <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                Memproses...
-              </>
-            ) : isSubmitDisabled ? (
-              <>
-                <AlertTriangle className="w-3 h-3 mr-1" />
-                Error
-              </>
-            ) : (
-              <>
-                <StopCircle className="w-3 h-3 mr-1" />
-                Bayar {formatCurrency(finalTotal)}
-              </>
-            )}
-          </Button>
+    <div className="p-3 sm:p-4 space-y-3">
+      {/* ✅ UPDATED: Breakdown Total dengan F&B Payment Timing */}
+      <div className="space-y-2 border-t pt-3">
+        <div className="text-sm font-medium text-gray-700 mb-2">Rincian Pembayaran:</div>
+        
+        {/* Session Cost */}
+        <div className="flex justify-between text-sm">
+          <span className="text-gray-600">Biaya Session:</span>
+          <span className="font-medium">{formatCurrency(sessionCost.totalCost)}</span>
         </div>
-      </DialogFooter>
+
+        {/* ✅ ADDED: F&B End of Session (yang akan ditagih) */}
+        {endOfSessionCount > 0 && (
+          <div className="flex justify-between text-sm">
+            <span className="text-orange-600">F&B Belum Dibayar ({endOfSessionCount} items):</span>
+            <span className="font-medium text-orange-700">+{formatCurrency(endOfSessionFnbTotal)}</span>
+          </div>
+        )}
+
+        {/* Manual F&B Amount */}
+        {formData.fnbAmount > 0 && (
+          <div className="flex justify-between text-sm">
+            <span className="text-blue-600">F&B Manual:</span>
+            <span className="font-medium text-blue-700">+{formatCurrency(formData.fnbAmount)}</span>
+          </div>
+        )}
+
+        {/* ✅ ADDED: F&B Immediate Payment (untuk info, tidak ditagih) */}
+        {immediateCount > 0 && (
+          <div className="flex justify-between text-sm opacity-60">
+            <span className="text-gray-500 line-through">F&B Sudah Dibayar ({immediateCount} items):</span>
+            <span className="text-gray-500 line-through">{formatCurrency(immediatePaymentFnbTotal)}</span>
+          </div>
+        )}
+
+        {/* Divider */}
+        <div className="border-t my-2"></div>
+
+        {/* ✅ FIXED: Final Total (hanya include yang akan ditagih) */}
+        <div className="flex justify-between text-base font-bold">
+          <span className="text-gray-900">Total Tagihan:</span>
+          <span className="text-green-600">{formatCurrency(finalTotal)}</span>
+        </div>
+
+        {/* ✅ ADDED: Info jika ada F&B immediate payment */}
+        {immediateCount > 0 && (
+          <div className="text-xs text-gray-500 italic">
+            * {immediateCount} F&B items sudah dibayar terpisah ({formatCurrency(immediatePaymentFnbTotal)})
+          </div>
+        )}
+      </div>
+
+      {/* Action Buttons */}
+      <div className="flex space-x-2">
+        <Button
+          variant="outline"
+          onClick={onCancel}
+          disabled={loading}
+          className="flex-1"
+        >
+          Batal
+        </Button>
+        <Button
+          onClick={onSubmit}
+          disabled={loading || !isValidPayment}
+          className="flex-1"
+        >
+          {loading ? (
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              Memproses...
+            </>
+          ) : (
+            `Bayar ${formatCurrency(finalTotal)}`
+          )}
+        </Button>
+      </div>
+
+      {/* Error Display */}
+      {calculationError && (
+        <div className="text-xs text-red-600 bg-red-50 p-2 rounded">
+          Error: {calculationError}
+        </div>
+      )}
     </div>
   )
 }

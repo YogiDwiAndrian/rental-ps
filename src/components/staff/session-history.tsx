@@ -30,43 +30,11 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+import { RentalSession, SessionHistoryResponse } from '@/types/session'
 
 // ============================================
 // TYPES
 // ============================================
-
-interface RentalSession {
-  id: string
-  unitId: string
-  unitName: string
-  customerName?: string
-  billingModel: 'timer' | 'hourly' | 'package'
-  status: 'active' | 'completed' | 'cancelled'
-  startTime: string
-  endTime?: string
-  duration?: number
-  totalAmount: number
-  purchasedDuration: number
-  extendedDuration: number
-  notes?: string
-  createdBy?: string
-  createdByName?: string
-  hasFnbOrders: boolean
-  fnbOrdersCount: number
-  fnbOrdersTotal: number
-}
-
-interface SessionHistoryResponse {
-  success: boolean
-  data: RentalSession[]
-  pagination: {
-    page: number
-    limit: number
-    total: number
-    totalPages: number
-  }
-  message: string
-}
 
 interface SessionHistoryProps {
   locationId: string
@@ -332,117 +300,141 @@ const [dateTo, setDateTo] = useState<string>('')
   }, [fetchSessions])
 
   // ===== RENDER HELPERS =====
-  const renderSessionCard = (session: RentalSession) => {
-    return (
-      <Card key={session.id} className="mb-4">
-        <CardContent className="pt-4">
-          {/* Header Row */}
-          <div className="flex items-start justify-between mb-3">
-            <div className="flex items-center space-x-3">
-              <div className="flex flex-col">
-                <div className="flex items-center space-x-2">
-                  <span className="font-semibold text-lg">{session.unitName}</span>
-                  <Badge className={cn("text-xs", getStatusColor(session.status))}>
-                    {getStatusIcon(session.status)}
-                    <span className="ml-1">{getStatusText(session.status)}</span>
-                  </Badge>
-                </div>
+const renderSessionCard = (session: RentalSession) => {
+  return (
+    <Card key={session.id} className="mb-4">
+      <CardContent className="pt-4">
+        {/* Header Row */}
+        <div className="flex items-start justify-between mb-3">
+          <div className="flex items-center space-x-3">
+            <div className="flex flex-col">
+              <div className="flex items-center space-x-2">
+                <span className="font-semibold text-lg">{session.unitName}</span>
+                <Badge className={cn("text-xs", getStatusColor(session.status))}>
+                  {getStatusIcon(session.status)}
+                  <span className="ml-1">{getStatusText(session.status)}</span>
+                </Badge>
+              </div>
+              
+              {/* Customer and Staff Info */}
+              <div className="flex flex-col space-y-1 mt-1">
                 {session.customerName && (
-                  <div className="flex items-center text-sm text-gray-600 mt-1">
+                  <div className="flex items-center text-sm text-gray-600">
                     <User className="w-4 h-4 mr-1" />
-                    {session.customerName}
+                    <span className="font-medium">Customer:</span>
+                    <span className="ml-1">{session.customerName}</span>
+                  </div>
+                )}
+                
+                {/* Staff name */}
+                {session.createdByName && (
+                  <div className="flex items-center text-sm text-blue-600">
+                    <User className="w-4 h-4 mr-1" />
+                    <span className="font-medium">Staff:</span>
+                    <span className="ml-1">{session.createdByName}</span>
                   </div>
                 )}
               </div>
             </div>
-            
-            <div className="text-right">
+          </div>
+          
+          {/* ✅ UPDATED: Show both session total and grand total */}
+          <div className="text-right">
+            <div className="flex flex-col">
+              {/* Session Amount */}
               <div className="font-bold text-lg text-green-600">
                 {formatCurrency(session.totalAmount)}
               </div>
-              <Badge className={cn("text-xs mt-1", getBillingModelColor(session.billingModel))}>
-                {getBillingModelIcon(session.billingModel)}
-                <span className="ml-1">{getBillingModelText(session.billingModel)}</span>
-              </Badge>
-            </div>
-          </div>
-
-          {/* Session Details */}
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <span className="text-gray-500">Mulai:</span>
-              <div className="font-medium">
-                {formatDate(session.startTime)} {formatTime(session.startTime)}
-              </div>
-            </div>
-            {session.endTime && (
-              <div>
-                <span className="text-gray-500">Selesai:</span>
-                <div className="font-medium">
-                  {formatDate(session.endTime)} {formatTime(session.endTime)}
-                </div>
-              </div>
-            )}
-            {session.duration && (
-              <div>
-                <span className="text-gray-500">Durasi:</span>
-                <div className="font-medium">{formatDuration(session.duration)}</div>
-              </div>
-            )}
-            <div>
-              <span className="text-gray-500">Waktu Dibeli:</span>
-              <div className="font-medium">{formatDuration(session.purchasedDuration)}</div>
-            </div>
-            {session.extendedDuration > 0 && (
-              <div>
-                <span className="text-gray-500">Perpanjangan:</span>
-                <div className="font-medium">{formatDuration(session.extendedDuration)}</div>
-              </div>
-            )}
-          </div>
-
-          {/* F&B Orders Info */}
-          {session.hasFnbOrders && (
-            <div className="mt-3 pt-3 border-t">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center text-sm text-gray-600">
-                  <Coffee className="w-4 h-4 mr-1" />
-                  <span>{session.fnbOrdersCount} F&B Order(s)</span>
-                  <span className="ml-2 font-medium text-green-600">
-                    {formatCurrency(session.fnbOrdersTotal)}
+              
+              {/* ✅ ADDED: Grand Total (if different from session amount) */}
+              {session.grandTotal && session.grandTotal > session.totalAmount && (
+                <div className="text-sm text-gray-600 mt-1">
+                  <span className="font-medium">Total + F&B:</span>
+                  <br />
+                  <span className="font-bold text-green-700">
+                    {formatCurrency(session.grandTotal)}
                   </span>
                 </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleViewFnbOrders(session.id)}
-                  className="text-xs"
-                >
-                  <ExternalLink className="w-3 h-3 mr-1" />
-                  Lihat F&B
-                </Button>
+              )}
+            </div>
+            
+            <Badge className={cn("text-xs mt-1", getBillingModelColor(session.billingModel))}>
+              {getBillingModelIcon(session.billingModel)}
+              <span className="ml-1">{getBillingModelText(session.billingModel)}</span>
+            </Badge>
+          </div>
+        </div>
+
+        {/* Session Details */}
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <span className="text-gray-500">Mulai:</span>
+            <div className="font-medium">
+              {formatDate(session.startTime)} {formatTime(session.startTime)}
+            </div>
+          </div>
+          {session.endTime && (
+            <div>
+              <span className="text-gray-500">Selesai:</span>
+              <div className="font-medium">
+                {formatDate(session.endTime)} {formatTime(session.endTime)}
               </div>
             </div>
           )}
+        </div>
 
-          {/* Notes - Remove since not in schema */}
-          {session.notes && (
-            <div className="mt-3 pt-3 border-t">
-              <span className="text-gray-500 text-sm">Catatan:</span>
-              <p className="text-sm mt-1">{session.notes}</p>
+        {/* Duration and F&B Info */}
+        {session.duration && (
+          <div className="flex items-center justify-between mt-3 pt-3 border-t">
+            <div className="flex items-center space-x-4 text-sm">
+              <div className="flex items-center">
+                <Clock className="w-4 h-4 mr-1 text-blue-500" />
+                <span>Durasi: {formatDuration(session.duration)}</span>
+              </div>
+              
+              {/* ✅ FIXED: F&B count now excludes cancelled orders */}
+              {session.hasFnbOrders && (
+                <div className="flex items-center">
+                  <Coffee className="w-4 h-4 mr-1 text-orange-500" />
+                  <span>F&B: {session.fnbOrdersCount} items ({formatCurrency(session.fnbOrdersTotal)})</span>
+                </div>
+              )}
             </div>
-          )}
+            
+            {session.hasFnbOrders && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleViewFnbOrders(session.id)}
+                className="text-xs"
+              >
+                <Eye className="w-3 h-3 mr-1" />
+                Detail F&B
+              </Button>
+            )}
+          </div>
+        )}
 
-          {/* Staff Info */}
-          {session.createdByName && (
-            <div className="mt-2 text-xs text-gray-500">
-              Dibuat oleh: {session.createdByName}
+        {/* ✅ ADDED: Grand Total summary bar (if has F&B) */}
+        {session.hasFnbOrders && session.grandTotal && (
+          <div className="mt-3 pt-2 border-t bg-gray-50 -mx-6 px-6 -mb-6 pb-6 rounded-b-lg">
+            <div className="flex justify-between items-center text-sm">
+              <span className="font-medium text-gray-700">Total Keseluruhan:</span>
+              <div className="text-right">
+                <div className="font-bold text-green-700">
+                  {formatCurrency(session.grandTotal)}
+                </div>
+                <div className="text-xs text-gray-500">
+                  Session: {formatCurrency(session.totalAmount)} + F&B: {formatCurrency(session.fnbOrdersTotal)}
+                </div>
+              </div>
             </div>
-          )}
-        </CardContent>
-      </Card>
-    )
-  }
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
 
   // ===== GROUP BY DATE =====
   const groupSessionsByDate = (sessions: RentalSession[]) => {

@@ -33,7 +33,6 @@ enum BillingType {
   timer
   hourly
   package
-  hybrid
 
   @@map("BillingType")
 }
@@ -263,16 +262,17 @@ model User {
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
   // Relations - FIXED: Remove duplicate FnbOrder relation
-  tenant              Tenant?              @relation(fields: [tenantId], references: [id])
-  accounts            Account[]
-  sessions            Session[]
-  locationAssignments LocationAssignment[]
-  whatsappContacts    WhatsAppContact[]
-  auditLogs           AuditLog[]
-  userPreference      UserPreference?
-  workSessions        WorkSession[]
-  createdFnbOrders    FnbOrder[]           @relation("FnbOrderCreatedBy")
-  cancelledFnbOrders  FnbOrder[]           @relation("FnbOrderCancelledBy")
+  tenant                Tenant?              @relation(fields: [tenantId], references: [id])
+  accounts              Account[]
+  sessions              Session[]
+  locationAssignments   LocationAssignment[]
+  whatsappContacts      WhatsAppContact[]
+  auditLogs             AuditLog[]
+  userPreference        UserPreference?
+  workSessions          WorkSession[]
+  createdFnbOrders      FnbOrder[]           @relation("FnbOrderCreatedBy")
+  cancelledFnbOrders    FnbOrder[]           @relation("FnbOrderCancelledBy")
+  createdRentalSessions RentalSession[]      @relation("SessionCreatedBy")
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -431,6 +431,7 @@ model RentalSession {
   id                String        @id @default(cuid())
   locationId        String        @map("location_id")
   unitId            String        @map("unit_id")
+  customerName      String?       @map("customer_name")
   billingModel      BillingType   @map("billing_model")
   status            SessionStatus @default(active)
   startTime         DateTime      @map("start_time")
@@ -438,15 +439,19 @@ model RentalSession {
   purchasedDuration Int           @default(0) @map("purchased_duration")
   extendedDuration  Int           @default(0) @map("extended_duration")
   totalAmount       Decimal       @map("total_amount") @db.Decimal(10, 2)
+  createdBy         String?       @map("created_by")
   createdAt         DateTime      @default(now()) @map("created_at")
   updatedAt         DateTime      @updatedAt @map("updated_at")
 
   // Relations
-  location     Location      @relation(fields: [locationId], references: [id])
-  unit         Unit          @relation(fields: [unitId], references: [id])
-  transactions Transaction[]
-  fnbOrders    FnbOrder[]
+  location      Location      @relation(fields: [locationId], references: [id])
+  unit          Unit          @relation(fields: [unitId], references: [id])
+  createdByUser User?         @relation("SessionCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  transactions  Transaction[]
+  fnbOrders     FnbOrder[]
 
+  @@index([customerName])
+  @@index([createdBy])
   @@map("rental_sessions")
 }
 

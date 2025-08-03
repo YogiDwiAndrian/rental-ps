@@ -208,6 +208,7 @@ export async function POST(
           totalAmount: sessionCost, // Only session cost
           updatedAt: new Date()
         }
+    
       })
 
       console.log('✅ Rental session updated to completed')

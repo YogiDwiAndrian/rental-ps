@@ -1,10 +1,45 @@
 // src/types/session.ts
-import { BillingType, SessionStatus, PaymentStatus } from '@prisma/client'
+import { BillingType, SessionStatus, PaymentStatus, Unit, FnbOrder, Transaction, User } from '@prisma/client'
 import { PackageRate } from './package'
 
 // ============================================
 // SESSION MANAGEMENT TYPES
 // ============================================
+
+export interface RentalSession {
+  id: string
+  unitId: string
+  unitName: string
+  customerName?: string // ✅ ADDED: Opsional customer name
+  billingModel: 'timer' | 'hourly' | 'package' // Keep as string literal (match existing)
+  status: 'active' | 'completed' | 'cancelled' // Keep as string literal (match existing)
+  startTime: string // Keep as string ISO format (match existing)
+  endTime?: string // Keep as string ISO format (match existing)
+  duration?: number // Keep as existing
+  totalAmount: number
+  purchasedDuration: number
+  extendedDuration: number
+  notes?: string
+  createdBy?: string // ✅ ADDED: Staff ID who created session
+  createdByName?: string // ✅ ADDED: Staff name who created session
+  hasFnbOrders: boolean // Keep as existing
+  fnbOrdersCount: number // Keep as existing
+  fnbOrdersTotal: number // Keep as existing
+  grandTotal?: number
+}
+
+// Interface untuk response API history
+export interface SessionHistoryResponse {
+  success: boolean
+  data: RentalSession[]
+  pagination: {
+    page: number
+    limit: number
+    total: number
+    totalPages: number
+  }
+  message: string
+}
 
 export interface SessionDetails {
   id: string
@@ -62,7 +97,10 @@ export interface StartSessionResponse {
   data?: {
     sessionId: string
     unitName: string
-    billingModel: BillingType
+    customerName?: string // ✅ ADDED
+    createdBy?: string // ✅ ADDED
+    createdByName?: string // ✅ ADDED
+    billingModel: 'timer' | 'hourly' | 'package'
     startTime: string
     purchasedDuration?: number
     totalAmount?: number

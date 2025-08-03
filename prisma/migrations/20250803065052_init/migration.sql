@@ -5,7 +5,7 @@ CREATE TYPE "UserRole" AS ENUM ('super_admin', 'owner', 'staff');
 CREATE TYPE "UnitStatus" AS ENUM ('available', 'occupied', 'maintenance', 'broken');
 
 -- CreateEnum
-CREATE TYPE "BillingType" AS ENUM ('timer', 'hourly', 'package', 'hybrid');
+CREATE TYPE "BillingType" AS ENUM ('timer', 'hourly', 'package');
 
 -- CreateEnum
 CREATE TYPE "SessionStatus" AS ENUM ('active', 'completed', 'cancelled', 'power_outage_stopped');
@@ -201,6 +201,7 @@ CREATE TABLE "rental_sessions" (
     "id" TEXT NOT NULL,
     "location_id" TEXT NOT NULL,
     "unit_id" TEXT NOT NULL,
+    "customer_name" TEXT,
     "billing_model" "BillingType" NOT NULL,
     "status" "SessionStatus" NOT NULL DEFAULT 'active',
     "start_time" TIMESTAMP(3) NOT NULL,
@@ -208,6 +209,7 @@ CREATE TABLE "rental_sessions" (
     "purchased_duration" INTEGER NOT NULL DEFAULT 0,
     "extended_duration" INTEGER NOT NULL DEFAULT 0,
     "total_amount" DECIMAL(10,2) NOT NULL,
+    "created_by" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
@@ -450,6 +452,12 @@ CREATE INDEX "work_sessions_status_idx" ON "work_sessions"("status");
 CREATE UNIQUE INDEX "units_location_id_name_key" ON "units"("location_id", "name");
 
 -- CreateIndex
+CREATE INDEX "rental_sessions_customer_name_idx" ON "rental_sessions"("customer_name");
+
+-- CreateIndex
+CREATE INDEX "rental_sessions_created_by_idx" ON "rental_sessions"("created_by");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "fnb_categories_location_id_name_key" ON "fnb_categories"("location_id", "name");
 
 -- CreateIndex
@@ -538,6 +546,9 @@ ALTER TABLE "rental_sessions" ADD CONSTRAINT "rental_sessions_location_id_fkey" 
 
 -- AddForeignKey
 ALTER TABLE "rental_sessions" ADD CONSTRAINT "rental_sessions_unit_id_fkey" FOREIGN KEY ("unit_id") REFERENCES "units"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "rental_sessions" ADD CONSTRAINT "rental_sessions_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "fnb_categories" ADD CONSTRAINT "fnb_categories_location_id_fkey" FOREIGN KEY ("location_id") REFERENCES "locations"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

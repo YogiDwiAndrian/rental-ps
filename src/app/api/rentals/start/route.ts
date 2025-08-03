@@ -5,6 +5,7 @@ import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { z } from 'zod'
 import { BillingType, SessionStatus, UnitStatus } from '@prisma/client'
+import { StartSessionResponse } from '@/types/session'
 
 // ============================================
 // VALIDATION SCHEMA
@@ -23,20 +24,6 @@ const startSessionSchema = z.object({
 // TYPES
 // ============================================
 
-interface StartSessionResponse {
-  success: boolean
-  data?: {
-    sessionId: string
-    unitName: string
-    billingModel: BillingType
-    startTime: string
-    purchasedDuration?: number
-    totalAmount?: number
-    estimatedEndTime?: string
-  }
-  error?: string
-  details?: unknown
-}
 
 // Fixed PackageRate interface to match seed data
 interface PackageRate {
@@ -250,6 +237,8 @@ export async function POST(request: NextRequest): Promise<NextResponse<StartSess
         data: {
           locationId: locationId,
           unitId: validatedData.unitId,
+          customerName: validatedData.customerName || null,
+           createdBy: session.user.id,
           billingModel: validatedData.billingModel as BillingType,
           status: SessionStatus.active,
           startTime: new Date(),
@@ -280,7 +269,6 @@ export async function POST(request: NextRequest): Promise<NextResponse<StartSess
             paymentStatus: 'paid',
             paymentMethod: 'cash',
             description: `${validatedData.billingModel} session payment`
-            // ✅ Removed 'notes' field - check if exists in Transaction schema
           }
         })
       }

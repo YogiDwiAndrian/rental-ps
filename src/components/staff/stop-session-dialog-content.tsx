@@ -20,7 +20,8 @@ import {
   Clock,
   CheckCircle2,
   XCircle,
-  DollarSign
+  DollarSign,
+  Loader2
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -194,9 +195,11 @@ export function StopSessionDialogContent({
     order.paymentTiming === 'end_of_session' && order.status !== 'cancelled'
   )
   const cancelledOrders = attachedFnbOrders.filter(order => order.status === 'cancelled')
+
+  const immediateTotal = immediateOrders.reduce((sum, order) => sum + order.totalAmount, 0)
+const endOfSessionTotal = endOfSessionOrders.reduce((sum, order) => sum + order.totalAmount, 0)
   
   // FIXED: Calculate totals - only include non-cancelled orders
-  const totalImmediateFnb = immediateOrders.reduce((sum, order) => sum + order.totalAmount, 0)
   const totalEndOfSessionFnb = endOfSessionOrders.reduce((sum, order) => sum + order.totalAmount, 0)
   const finalTotal = sessionCost.totalCost + totalEndOfSessionFnb + formData.fnbAmount
 
@@ -246,131 +249,115 @@ export function StopSessionDialogContent({
         </CardContent>
       </Card>
 
-      {/* F&B Orders Attached to Session */}
-      {attachedFnbOrders.length > 0 && (
-        <Card className="border">
-          <CardHeader className="pb-2">
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Coffee className="w-4 h-4 text-orange-600" />
-                Pesanan F&B Terlampir
-              </CardTitle>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={onRefreshFnb}
-                disabled={fetchingFnb}
-                className="h-7 w-7 p-0"
-              >
-                <RefreshCw className={cn("w-3 h-3", fetchingFnb && "animate-spin")} />
-              </Button>
+      {/* F&B Orders Summary */}
+{attachedFnbOrders.length > 0 && (
+  <div className="space-y-3">
+    <div className="flex items-center justify-between">
+      <Label className="text-sm font-medium">F&B Orders Terlampir</Label>
+      {fetchingFnb && <Loader2 className="w-4 h-4 animate-spin text-gray-400" />}
+    </div>
+    
+    {/* ✅ ADDED: F&B yang belum dibayar (end_of_session) - akan masuk billing */}
+    {endOfSessionOrders.length > 0 && (
+      <div className="bg-orange-50 border border-orange-200 p-3 rounded-md">
+        <div className="flex justify-between items-center mb-2">
+          <div className="flex items-center space-x-2">
+            <Clock className="w-4 h-4 text-orange-600" />
+            <span className="text-sm font-medium text-orange-800">
+              Belum Dibayar ({endOfSessionOrders.length} items)
+            </span>
+          </div>
+          <span className="font-bold text-orange-700">
+            {formatCurrency(endOfSessionTotal)}
+          </span>
+        </div>
+        <div className="text-xs text-orange-600 mb-2">
+          ✅ Akan ditambahkan ke total session
+        </div>
+        
+        {/* List items */}
+        <div className="space-y-1">
+          {endOfSessionOrders.map(order => (
+            <div key={order.id} className="text-xs text-orange-700 bg-orange-100 p-2 rounded">
+              {order.items.map(item => (
+                <div key={item.id} className="flex justify-between">
+                  <span>{item.quantity}x {item.fnbItemName}</span>
+                  <span>{formatCurrency(item.totalPrice)}</span>
+                </div>
+              ))}
             </div>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            
-            {/* Active Orders (will be paid with session) */}
-            {endOfSessionOrders.length > 0 && (
-              <div>
-                <h5 className="text-sm font-medium text-green-700 mb-2">
-                  Akan Dibayar Bersamaan (End of Session)
-                </h5>
-                <div className="space-y-2">
-                  {endOfSessionOrders.map((order) => (
-                    <div key={order.id} className="p-2 bg-green-50 rounded border border-green-200">
-                      <div className="flex items-center justify-between mb-1">
-                        <Badge variant="outline" className={getFnbStatusColor(order.status)}>
-                          {getFnbStatusIcon(order.status)}
-                          <span className="ml-1">{getFnbStatusText(order.status)}</span>
-                        </Badge>
-                        <span className="font-medium text-green-700">{formatCurrency(order.totalAmount)}</span>
-                      </div>
-                      <div className="text-xs text-gray-600">
-                        {order.items.map(item => `${item.quantity}x ${item.fnbItemName}`).join(', ')}
-                      </div>
-                    </div>
-                  ))}
-                  <div className="flex items-center justify-between text-sm font-medium border-t pt-1">
-                    <span>Subtotal F&B:</span>
-                    <span className="text-green-600">{formatCurrency(totalEndOfSessionFnb)}</span>
-                  </div>
+          ))}
+        </div>
+      </div>
+    )}
+    
+    {/* ✅ ADDED: F&B yang sudah dibayar (immediate) - untuk info saja */}
+    {immediateOrders.length > 0 && (
+      <div className="bg-gray-50 border border-gray-200 p-3 rounded-md">
+        <div className="flex justify-between items-center mb-2">
+          <div className="flex items-center space-x-2">
+            <DollarSign className="w-4 h-4 text-gray-600" />
+            <span className="text-sm font-medium text-gray-700 line-through">
+              Sudah Dibayar ({immediateOrders.length} items)
+            </span>
+          </div>
+          <span className="font-bold text-gray-600 line-through">
+            {formatCurrency(immediateTotal)}
+          </span>
+        </div>
+        <div className="text-xs text-gray-500 mb-2">
+          ❌ Tidak ditambahkan ke total (sudah dibayar sebelumnya)
+        </div>
+        
+        {/* List items */}
+        <div className="space-y-1">
+          {immediateOrders.map(order => (
+            <div key={order.id} className="text-xs text-gray-600 bg-gray-100 p-2 rounded line-through">
+              {order.items.map(item => (
+                <div key={item.id} className="flex justify-between">
+                  <span>{item.quantity}x {item.fnbItemName}</span>
+                  <span>{formatCurrency(item.totalPrice)}</span>
                 </div>
-              </div>
-            )}
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
 
-            {/* Already Paid Orders (immediate payment) */}
-            {immediateOrders.length > 0 && (
-              <div>
-                <h5 className="text-sm font-medium text-blue-700 mb-2">
-                  Sudah Dibayar Sebelumnya (Immediate)
-                </h5>
-                <div className="space-y-2">
-                  {immediateOrders.map((order) => (
-                    <div key={order.id} className="p-2 bg-blue-50 rounded border border-blue-200">
-                      <div className="flex items-center justify-between mb-1">
-                        <Badge variant="outline" className={getFnbStatusColor(order.status)}>
-                          {getFnbStatusIcon(order.status)}
-                          <span className="ml-1">{getFnbStatusText(order.status)}</span>
-                        </Badge>
-                        <span className="font-medium text-blue-700">{formatCurrency(order.totalAmount)}</span>
-                      </div>
-                      <div className="text-xs text-gray-600">
-                        {order.items.map(item => `${item.quantity}x ${item.fnbItemName}`).join(', ')}
-                      </div>
-                    </div>
-                  ))}
-                  <div className="text-xs text-blue-600">
-                    Tidak dihitung dalam total (sudah dibayar)
-                  </div>
-                </div>
-              </div>
-            )}
+    {/* ✅ ADDED: F&B yang dibatalkan - untuk info saja */}
+    {cancelledOrders.length > 0 && (
+      <div className="bg-red-50 border border-red-200 p-3 rounded-md">
+        <div className="flex justify-between items-center mb-2">
+          <div className="flex items-center space-x-2">
+            <XCircle className="w-4 h-4 text-red-600" />
+            <span className="text-sm font-medium text-red-700 line-through">
+              Dibatalkan ({cancelledOrders.length} items)
+            </span>
+          </div>
+          <span className="font-bold text-red-600 line-through">
+            {formatCurrency(cancelledOrders.reduce((sum, order) => sum + order.totalAmount, 0))}
+          </span>
+        </div>
+        <div className="text-xs text-red-500">
+          ❌ Tidak ditagihkan (sudah dibatalkan)
+        </div>
+      </div>
+    )}
 
-            {/* Cancelled Orders (shown for info but not calculated) */}
-            {cancelledOrders.length > 0 && (
-              <div>
-                <h5 className="text-sm font-medium text-gray-600 mb-2">
-                  Pesanan Dibatalkan
-                </h5>
-                <div className="space-y-2">
-                  {cancelledOrders.map((order) => (
-                    <div key={order.id} className="p-2 bg-gray-50 rounded border border-gray-200 opacity-75">
-                      <div className="flex items-center justify-between mb-1">
-                        <Badge variant="outline" className={getFnbStatusColor(order.status)}>
-                          {getFnbStatusIcon(order.status)}
-                          <span className="ml-1">{getFnbStatusText(order.status)}</span>
-                        </Badge>
-                        <span className="font-medium text-gray-500 line-through">{formatCurrency(order.totalAmount)}</span>
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        {order.items.map(item => `${item.quantity}x ${item.fnbItemName}`).join(', ')}
-                      </div>
-                    </div>
-                  ))}
-                  <div className="text-xs text-gray-500">
-                    Tidak dihitung dalam total (dibatalkan)
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* No F&B Orders */}
-            {attachedFnbOrders.length === 0 && !fetchingFnb && (
-              <div className="text-center py-4 text-gray-500">
-                <Coffee className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">Tidak ada pesanan F&B untuk session ini</p>
-              </div>
-            )}
-
-            {/* Loading State */}
-            {fetchingFnb && (
-              <div className="text-center py-4">
-                <RefreshCw className="w-6 h-6 mx-auto mb-2 text-gray-400 animate-spin" />
-                <p className="text-sm text-gray-600">Memuat pesanan F&B...</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+    {/* Refresh Button */}
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={onRefreshFnb}
+      disabled={fetchingFnb}
+      className="w-full"
+    >
+      <RefreshCw className={cn("w-4 h-4 mr-2", fetchingFnb && "animate-spin")} />
+      Refresh F&B Orders
+    </Button>
+  </div>
+)}
 
       {/* Manual F&B Amount */}
       <Card className="border">
